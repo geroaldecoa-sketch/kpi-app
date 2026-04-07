@@ -294,10 +294,3 @@ app.listen(PORT, () => {
   console.log(`🚀 KPI Producción corriendo en http://localhost:${PORT}`);
   getDb(); // inicializar DB al arrancar
 });
-
-app.get("/", (req, res) => {
-  res.send("Sistema KPI Producción funcionando 🚀");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor listo"));
