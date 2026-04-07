@@ -295,8 +295,6 @@ app.listen(PORT, () => {
   getDb(); // inicializar DB al arrancar
 });
 
-const app = express();
-
 app.get("/", (req, res) => {
   res.send("Sistema KPI Producción funcionando 🚀");
 });
