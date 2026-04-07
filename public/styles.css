@@ -1,0 +1,115 @@
+/* =====================================================
+   KPI PRODUCCIÓN – styles.css
+   ===================================================== */
+
+body {
+  background-color: #f4f6f9;
+  font-size: 0.9rem;
+}
+
+/* ─── Navbar ─── */
+.navbar-brand {
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+}
+
+/* ─── Secciones ─── */
+.app-section {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Botones pequeños ─── */
+.btn-xs {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  border-radius: 0.25rem;
+}
+
+/* ─── Cards KPI ─── */
+.kpi-card {
+  background: #fff;
+  border-radius: 10px;
+  border-left: 5px solid #dee2e6;
+  padding: 1rem 1.2rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  height: 100%;
+}
+
+.kpi-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.kpi-label {
+  font-size: 0.78rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kpi-card.border-success  { border-left-color: #28a745; }
+.kpi-card.border-primary  { border-left-color: #007bff; }
+.kpi-card.border-info     { border-left-color: #17a2b8; }
+.kpi-card.border-warning  { border-left-color: #ffc107; }
+.kpi-card.border-danger   { border-left-color: #dc3545; }
+.kpi-card.border-secondary{ border-left-color: #6c757d; }
+
+/* ─── KPI Preview en formulario ─── */
+.kpi-preview {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 0.75rem;
+  height: 100%;
+}
+
+/* ─── Tabla ─── */
+.table th {
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.table td {
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
+/* ─── Card headers ─── */
+.card-header {
+  font-size: 0.9rem;
+}
+
+/* ─── Formulario ─── */
+.form-label {
+  font-size: 0.85rem;
+}
+
+/* ─── Inputs ─── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+/* ─── Charts ─── */
+canvas {
+  max-height: 320px;
+}
+
+/* ─── Responsive ajustes ─── */
+@media (max-width: 768px) {
+  .kpi-value {
+    font-size: 1.4rem;
+  }
+
+  .table-responsive {
+    font-size: 0.78rem;
+  }
+}
