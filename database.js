@@ -2,9 +2,8 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 
 const DB_PATH = process.env.NODE_ENV === 'production'
-  ? '/var/data/kpi_produccion.db'
+  ? '/tmp/kpi_produccion.db'
   : path.join(__dirname, 'kpi_produccion.db');
-
 let db;
 
 function getDb() {
@@ -54,42 +53,42 @@ function insertSampleData() {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const samples = [
-    ['2026-01-06','Mañana',4,4,'Operación normal',null,'Producción fluida',8,7,0.5,0.5,3200,140],
-    ['2026-01-06','Tarde',3,5,'Cambio de formato',null,'Cambio de línea',8,6.5,1,0.5,2800,120],
-    ['2026-01-07','Mañana',4,4,'Mantenimiento línea 1','Mantenimiento','Parada mantenimiento',8,5,1,2,2100,90],
-    ['2026-01-07','Tarde',4,4,'Normal',null,'Sin novedad',8,7.5,0.5,0,3400,150],
-    ['2026-01-08','Mañana',4,4,'Falta de etiquetas','Falta de insumos','Retraso por insumos',8,6,0,2,2500,100],
-    ['2026-01-08','Tarde',4,4,'Normal',null,'Producción completa',8,8,0,0,3600,160],
-    ['2026-01-09','Mañana',4,4,'Corte eléctrico 1.5hs','Corte de luz','Corte imprevisto',8,6,0,2,2700,110],
-    ['2026-01-09','Tarde',4,4,'Normal',null,'Sin novedades',8,7,1,0,3100,135],
-    ['2026-01-13','Mañana',4,4,'Normal',null,'Buena producción',8,7.5,0.5,0,3350,148],
-    ['2026-01-13','Tarde',4,4,'Normal',null,'Normal',8,7,1,0,3000,130],
-    ['2026-01-14','Mañana',4,4,'Mant correctivo bomba','Mantenimiento','Falla bomba línea 2',8,4,2,2,1800,75],
-    ['2026-01-14','Tarde',4,4,'Normal',null,'Sin novedad',8,7,1,0,3100,132],
-    ['2026-01-20','Mañana',5,3,'Producción bidones',null,'Alta demanda bidones',8,8,0,0,1800,200],
-    ['2026-01-20','Tarde',3,5,'Producción botellas',null,'Alta demanda botellas',8,7.5,0.5,0,3400,90],
-    ['2026-01-21','Mañana',4,4,'Normal',null,'Normal',8,6.5,1,0.5,2900,120],
-    ['2026-02-03','Mañana',4,4,'Normal',null,'Normal',8,7,1,0,3100,130],
-    ['2026-02-03','Tarde',4,4,'Normal',null,'Normal',8,7.5,0.5,0,3300,140],
-    ['2026-02-04','Mañana',4,4,'Falta de envases','Falta de insumos','Producción reducida',8,5,1,2,2200,85],
-    ['2026-02-04','Tarde',4,4,'Normal',null,'Recuperación',8,7,1,0,3000,125],
-    ['2026-02-10','Mañana',4,4,'Normal',null,'Normal',8,8,0,0,3600,155],
-    ['2026-02-10','Tarde',4,4,'Normal',null,'Normal',8,7,1,0,3100,130],
-    ['2026-02-11','Mañana',4,4,'Mantenimiento','Mantenimiento','Mant programado',8,5,1,2,2000,80],
-    ['2026-02-17','Mañana',4,4,'Normal',null,'Normal',8,7.5,0.5,0,3300,140],
-    ['2026-02-17','Tarde',4,4,'Normal',null,'Normal',8,7,1,0,3000,128],
-    ['2026-02-18','Mañana',4,4,'Corte de luz tarde','Corte de luz','Corte 2 horas',8,6,0,2,2600,105],
-    ['2026-03-02','Mañana',4,4,'Normal',null,'Normal',8,7,1,0,3100,130],
-    ['2026-03-02','Tarde',4,4,'Normal',null,'Normal',8,7.5,0.5,0,3350,142],
-    ['2026-03-03','Mañana',5,3,'Alta demanda bidones',null,'Bidones prioritarios',8,8,0,0,1900,210],
-    ['2026-03-09','Mañana',4,4,'Normal',null,'Normal',8,7,1,0,3100,132],
-    ['2026-03-09','Tarde',4,4,'Mant preventivo','Mantenimiento','Revisión general',8,5,1,2,2100,88],
-    ['2026-03-10','Mañana',4,4,'Normal',null,'Normal',8,7.5,0.5,0,3300,140],
-    ['2026-03-16','Mañana',4,4,'Normal',null,'Normal',8,8,0,0,3600,155],
-    ['2026-03-16','Tarde',4,4,'Falta de tapas','Falta de insumos','Sin tapas 1.5hs',8,6,0.5,1.5,2600,108],
-    ['2026-03-17','Mañana',4,4,'Normal',null,'Normal',8,7,1,0,3000,128],
-    ['2026-03-23','Mañana',4,4,'Normal',null,'Normal',8,7.5,0.5,0,3300,140],
-    ['2026-03-23','Tarde',4,4,'Normal',null,'Normal',8,7,1,0,3050,130],
+    ['2026-01-06', 'Mañana', 4, 4, 'Operación normal', null, 'Producción fluida', 8, 7, 0.5, 0.5, 3200, 140],
+    ['2026-01-06', 'Tarde', 3, 5, 'Cambio de formato', null, 'Cambio de línea', 8, 6.5, 1, 0.5, 2800, 120],
+    ['2026-01-07', 'Mañana', 4, 4, 'Mantenimiento línea 1', 'Mantenimiento', 'Parada mantenimiento', 8, 5, 1, 2, 2100, 90],
+    ['2026-01-07', 'Tarde', 4, 4, 'Normal', null, 'Sin novedad', 8, 7.5, 0.5, 0, 3400, 150],
+    ['2026-01-08', 'Mañana', 4, 4, 'Falta de etiquetas', 'Falta de insumos', 'Retraso por insumos', 8, 6, 0, 2, 2500, 100],
+    ['2026-01-08', 'Tarde', 4, 4, 'Normal', null, 'Producción completa', 8, 8, 0, 0, 3600, 160],
+    ['2026-01-09', 'Mañana', 4, 4, 'Corte eléctrico 1.5hs', 'Corte de luz', 'Corte imprevisto', 8, 6, 0, 2, 2700, 110],
+    ['2026-01-09', 'Tarde', 4, 4, 'Normal', null, 'Sin novedades', 8, 7, 1, 0, 3100, 135],
+    ['2026-01-13', 'Mañana', 4, 4, 'Normal', null, 'Buena producción', 8, 7.5, 0.5, 0, 3350, 148],
+    ['2026-01-13', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3000, 130],
+    ['2026-01-14', 'Mañana', 4, 4, 'Mant correctivo bomba', 'Mantenimiento', 'Falla bomba línea 2', 8, 4, 2, 2, 1800, 75],
+    ['2026-01-14', 'Tarde', 4, 4, 'Normal', null, 'Sin novedad', 8, 7, 1, 0, 3100, 132],
+    ['2026-01-20', 'Mañana', 5, 3, 'Producción bidones', null, 'Alta demanda bidones', 8, 8, 0, 0, 1800, 200],
+    ['2026-01-20', 'Tarde', 3, 5, 'Producción botellas', null, 'Alta demanda botellas', 8, 7.5, 0.5, 0, 3400, 90],
+    ['2026-01-21', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 6.5, 1, 0.5, 2900, 120],
+    ['2026-02-03', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3100, 130],
+    ['2026-02-03', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7.5, 0.5, 0, 3300, 140],
+    ['2026-02-04', 'Mañana', 4, 4, 'Falta de envases', 'Falta de insumos', 'Producción reducida', 8, 5, 1, 2, 2200, 85],
+    ['2026-02-04', 'Tarde', 4, 4, 'Normal', null, 'Recuperación', 8, 7, 1, 0, 3000, 125],
+    ['2026-02-10', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 8, 0, 0, 3600, 155],
+    ['2026-02-10', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3100, 130],
+    ['2026-02-11', 'Mañana', 4, 4, 'Mantenimiento', 'Mantenimiento', 'Mant programado', 8, 5, 1, 2, 2000, 80],
+    ['2026-02-17', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7.5, 0.5, 0, 3300, 140],
+    ['2026-02-17', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3000, 128],
+    ['2026-02-18', 'Mañana', 4, 4, 'Corte de luz tarde', 'Corte de luz', 'Corte 2 horas', 8, 6, 0, 2, 2600, 105],
+    ['2026-03-02', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3100, 130],
+    ['2026-03-02', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7.5, 0.5, 0, 3350, 142],
+    ['2026-03-03', 'Mañana', 5, 3, 'Alta demanda bidones', null, 'Bidones prioritarios', 8, 8, 0, 0, 1900, 210],
+    ['2026-03-09', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3100, 132],
+    ['2026-03-09', 'Tarde', 4, 4, 'Mant preventivo', 'Mantenimiento', 'Revisión general', 8, 5, 1, 2, 2100, 88],
+    ['2026-03-10', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7.5, 0.5, 0, 3300, 140],
+    ['2026-03-16', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 8, 0, 0, 3600, 155],
+    ['2026-03-16', 'Tarde', 4, 4, 'Falta de tapas', 'Falta de insumos', 'Sin tapas 1.5hs', 8, 6, 0.5, 1.5, 2600, 108],
+    ['2026-03-17', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3000, 128],
+    ['2026-03-23', 'Mañana', 4, 4, 'Normal', null, 'Normal', 8, 7.5, 0.5, 0, 3300, 140],
+    ['2026-03-23', 'Tarde', 4, 4, 'Normal', null, 'Normal', 8, 7, 1, 0, 3050, 130],
   ];
 
   for (const row of samples) insert.run(...row);
