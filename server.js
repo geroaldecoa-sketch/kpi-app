@@ -294,7 +294,7 @@ app.listen(PORT, () => {
   console.log(`🚀 KPI Producción corriendo en http://localhost:${PORT}`);
   getDb(); // inicializar DB al arrancar
 });
-const express = require("express");
+
 const app = express();
 
 app.get("/", (req, res) => {
