@@ -157,8 +157,9 @@ function verDetalle(id, r) {
     `<i class="bi bi-clipboard2-data me-2"></i>Detalle — ${fmtFecha(r.fecha)} · Turno ${r.turno}`;
 
   const colorActivas = r.pct_horas_activas >= 75 ? 'success' : r.pct_horas_activas >= 50 ? 'warning' : 'danger';
+  const _motivoColor = { 'Mantenimiento': 'warning text-dark', 'Corte de luz': 'danger', 'Falta de insumos': 'info', 'Otros': 'secondary' };
   const motivoBadge  = r.motivo_parada
-    ? `<span class="badge bg-${r.motivo_parada==='Mantenimiento'?'warning text-dark':r.motivo_parada==='Corte de luz'?'danger':'info'}">${r.motivo_parada}</span>`
+    ? `<span class="badge bg-${_motivoColor[r.motivo_parada] || 'secondary'}">${r.motivo_parada}</span>`
     : '<span class="text-muted">Sin parada</span>';
 
   const totalBidones = (r.bidones_5L || 0) + (r.bidones_10L || 0);
@@ -542,7 +543,7 @@ async function cargarListado() {
       return;
     }
 
-    const colorParada = { 'Mantenimiento': 'warning', 'Falta de insumos': 'info', 'Corte de luz': 'danger' };
+    const colorParada = { 'Mantenimiento': 'warning text-dark', 'Falta de insumos': 'info', 'Corte de luz': 'danger', 'Otros': 'secondary' };
 
     tbody.innerHTML = rows.map(r => {
       return `
@@ -779,6 +780,7 @@ async function cargarReporteMensual() {
                   <th class="text-end">P. Mant.</th>
                   <th class="text-end">P. Insumos</th>
                   <th class="text-end">P. Corte</th>
+                  <th class="text-end">P. Otros</th>
                 </tr>
               </thead>
               <tbody>
@@ -801,6 +803,7 @@ async function cargarReporteMensual() {
                     <td class="text-end">${d.paradas_mantenimiento}</td>
                     <td class="text-end">${d.paradas_insumos}</td>
                     <td class="text-end">${d.paradas_corte}</td>
+                    <td class="text-end">${d.paradas_otros}</td>
                   </tr>`).join('')}
               </tbody>
               <tfoot class="table-light fw-bold">
@@ -818,6 +821,7 @@ async function cargarReporteMensual() {
                   <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_mantenimiento,0)}</td>
                   <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_insumos,0)}</td>
                   <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_corte,0)}</td>
+                  <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_otros,0)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -868,14 +872,15 @@ async function cargarReporteMensual() {
     const totMant    = datos.reduce((a, d) => a + d.paradas_mantenimiento, 0);
     const totInsumos = datos.reduce((a, d) => a + d.paradas_insumos, 0);
     const totCorte   = datos.reduce((a, d) => a + d.paradas_corte, 0);
-    const totalP     = totMant + totInsumos + totCorte;
+    const totOtros   = datos.reduce((a, d) => a + d.paradas_otros, 0);
+    const totalP     = totMant + totInsumos + totCorte + totOtros;
 
     if (totalP > 0) {
       chartParadas = new Chart(document.getElementById('chart-paradas'), {
         type: 'doughnut',
         data: {
-          labels: ['Mantenimiento', 'Falta de insumos', 'Corte de luz'],
-          datasets: [{ data: [totMant, totInsumos, totCorte], backgroundColor: ['rgba(255,193,7,0.85)', 'rgba(23,162,184,0.85)', 'rgba(220,53,69,0.85)'], borderWidth: 2 }]
+          labels: ['Mantenimiento', 'Falta de insumos', 'Corte de luz', 'Otros'],
+          datasets: [{ data: [totMant, totInsumos, totCorte, totOtros], backgroundColor: ['rgba(255,193,7,0.85)', 'rgba(23,162,184,0.85)', 'rgba(220,53,69,0.85)', 'rgba(108,117,125,0.85)'], borderWidth: 2 }]
         },
         options: {
           responsive: true,
@@ -918,6 +923,7 @@ function descargarPDFMensual() {
   const totMant     = datos.reduce((a, d) => a + d.paradas_mantenimiento, 0);
   const totInsumos  = datos.reduce((a, d) => a + d.paradas_insumos, 0);
   const totCorte    = datos.reduce((a, d) => a + d.paradas_corte, 0);
+  const totOtrosPDF = datos.reduce((a, d) => a + d.paradas_otros, 0);
 
   // Tarjetas resumen
   doc.autoTable({
@@ -947,7 +953,7 @@ function descargarPDFMensual() {
 
   doc.autoTable({
     startY: y,
-    head: [['Mes', '% Activas', '% Paradas', 'Bot/h', '5L/h', '10L/h', 'Botellas', 'Bid 5L', 'Bid 10L', 'Total Bid.', 'P.Mant.', 'P.Insum.', 'P.Corte']],
+    head: [['Mes', '% Activas', '% Paradas', 'Bot/h', '5L/h', '10L/h', 'Botellas', 'Bid 5L', 'Bid 10L', 'Total Bid.', 'P.Mant.', 'P.Insum.', 'P.Corte', 'P.Otros']],
     body: [
       ...datos.map(d => [
         mesLabel(d.mes),
@@ -963,6 +969,7 @@ function descargarPDFMensual() {
         d.paradas_mantenimiento,
         d.paradas_insumos,
         d.paradas_corte,
+        d.paradas_otros,
       ]),
       // Fila de totales
       [
@@ -976,7 +983,7 @@ function descargarPDFMensual() {
         totBid5L.toLocaleString('es-AR'),
         totBid10L.toLocaleString('es-AR'),
         totBidones.toLocaleString('es-AR'),
-        totMant, totInsumos, totCorte,
+        totMant, totInsumos, totCorte, totOtrosPDF,
       ]
     ],
     theme: 'striped',
@@ -985,7 +992,7 @@ function descargarPDFMensual() {
     columnStyles: {
       1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'},
       5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}, 8:{halign:'right'},
-      9:{halign:'right'}, 10:{halign:'right'}, 11:{halign:'right'}, 12:{halign:'right'},
+      9:{halign:'right'}, 10:{halign:'right'}, 11:{halign:'right'}, 12:{halign:'right'}, 13:{halign:'right'},
     },
     didParseCell: (data) => {
       if (data.row.index === datos.length) {
@@ -998,8 +1005,8 @@ function descargarPDFMensual() {
   y = doc.lastAutoTable.finalY + 8;
 
   // Tabla de distribución de paradas
-  if (totMant + totInsumos + totCorte > 0) {
-    const totalP = totMant + totInsumos + totCorte;
+  if (totMant + totInsumos + totCorte + totOtrosPDF > 0) {
+    const totalP = totMant + totInsumos + totCorte + totOtrosPDF;
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
     doc.setFillColor(255, 245, 220); doc.rect(14, y, 269, 6, 'F');
     doc.text('DISTRIBUCIÓN DE PARADAS', 16, y + 4.5);
@@ -1009,17 +1016,18 @@ function descargarPDFMensual() {
       startY: y,
       head: [['Motivo de Parada', 'Cant. ocurrencias', '% del total']],
       body: [
-        ['Mantenimiento',    totMant,    `${(totMant    / totalP * 100).toFixed(1)}%`],
-        ['Falta de insumos', totInsumos, `${(totInsumos / totalP * 100).toFixed(1)}%`],
-        ['Corte de luz',     totCorte,   `${(totCorte   / totalP * 100).toFixed(1)}%`],
-        ['TOTAL',            totalP,     '100%'],
+        ['Mantenimiento',    totMant,      `${(totMant    / totalP * 100).toFixed(1)}%`],
+        ['Falta de insumos', totInsumos,   `${(totInsumos / totalP * 100).toFixed(1)}%`],
+        ['Corte de luz',     totCorte,     `${(totCorte   / totalP * 100).toFixed(1)}%`],
+        ['Otros',            totOtrosPDF,  `${(totOtrosPDF/ totalP * 100).toFixed(1)}%`],
+        ['TOTAL',            totalP,       '100%'],
       ],
       theme: 'grid',
       headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9 },
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
       didParseCell: (data) => {
-        if (data.row.index === 3) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
+        if (data.row.index === 4) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
       },
       margin: { left: 14, right: 14 },
     });
