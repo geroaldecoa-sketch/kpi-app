@@ -435,10 +435,30 @@ function actualizarKPIPreview() {
 // ─────────────────────────────────────────────
 // FORMULARIO ABM – SUBMIT
 // ─────────────────────────────────────────────
+
+// Flag para prevenir doble envío
+let _enviandoFormulario = false;
+
 document.getElementById('form-produccion').addEventListener('submit', async e => {
+  // 1. Siempre prevenir el comportamiento por defecto del formulario
   e.preventDefault();
-  const alertEl = document.getElementById('alert-form');
+
+  // 2. Evitar doble envío: si ya se está procesando, ignorar el click adicional
+  if (_enviandoFormulario) {
+    console.warn('⚠️  Formulario ya en proceso de envío, se ignora click adicional');
+    return;
+  }
+
+  const alertEl  = document.getElementById('alert-form');
+  const btnSubmit = document.getElementById('btn-submit');
+  const btnText   = document.getElementById('btn-submit-text');
   alertEl.className = 'alert d-none';
+
+  // 3. Bloquear el botón y mostrar spinner mientras se procesa
+  _enviandoFormulario = true;
+  btnSubmit.disabled = true;
+  const textoOriginal = btnText.textContent;
+  btnText.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Guardando…';
 
   const data = {
     fecha:               document.getElementById('f-fecha').value,
@@ -456,15 +476,17 @@ document.getElementById('form-produccion').addEventListener('submit', async e =>
     bidones_10L:         parseInt(document.getElementById('f-bidones-10l').value)   || 0,
   };
 
+  console.log('📤 Enviando formulario:', JSON.stringify(data));
+
   const editId = document.getElementById('edit-id').value;
 
   try {
     if (editId) {
       await apiPut(`${API}/produccion/${editId}`, data);
-      toast('Registro actualizado correctamente');
+      toast('✅ Registro actualizado correctamente');
     } else {
       await apiPost(`${API}/produccion`, data);
-      toast('Registro guardado correctamente');
+      toast('✅ Registro guardado correctamente');
     }
     limpiarFormulario();
     mostrarSeccion('listado');
@@ -472,10 +494,19 @@ document.getElementById('form-produccion').addEventListener('submit', async e =>
       l.classList.toggle('active', l.dataset.section === 'listado');
     });
   } catch (err) {
+    // 4. Mostrar errores sin borrar el formulario para que el usuario pueda corregir
     const errores = err.errores || [err.error || 'Error desconocido'];
+    console.error('❌ Error al guardar registro:', errores);
     alertEl.className = 'alert alert-danger';
     alertEl.innerHTML = '<strong>Errores:</strong><ul class="mb-0 mt-1">' +
       errores.map(e => `<li>${e}</li>`).join('') + '</ul>';
+    // Hacer scroll al alert para que se vea el error
+    alertEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } finally {
+    // 5. Siempre desbloquear el botón al terminar (éxito o error)
+    _enviandoFormulario = false;
+    btnSubmit.disabled = false;
+    btnText.textContent = textoOriginal;
   }
 });
 

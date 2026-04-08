@@ -1,13 +1,15 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 
-const DB_PATH = process.env.NODE_ENV === 'production'
-  ? '/tmp/kpi_produccion.db'
-  : path.join(__dirname, 'kpi_produccion.db');
+// ⚠️  IMPORTANTE: La base de datos SIEMPRE se guarda junto al código,
+//     en la misma carpeta que este archivo. NO usar /tmp ni rutas temporales
+//     porque los datos se perderían al reiniciar el servidor.
+const DB_PATH = path.join(__dirname, 'kpi_produccion.db');
 let db;
 
 function getDb() {
   if (!db) {
+    console.log(`💾 Base de datos: ${DB_PATH}`);
     db = new DatabaseSync(DB_PATH);
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA foreign_keys = ON');

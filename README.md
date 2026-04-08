@@ -1,4 +1,4 @@
-# Sistema KPI Producción – Fábrica Envasadora de Aceite
+# Sistema KPI Producción – Envasadora de Aceite
 
 Sistema web para gestión de KPIs de producción. Permite cargar datos por turno y generar reportes automáticos.
 

@@ -68,6 +68,7 @@ app.get('/api/produccion', (req, res) => {
 
     res.json({ data: rows.map(calcularKPIs), total: total.n });
   } catch (err) {
+    console.error('❌ Error en GET /api/produccion:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -80,6 +81,7 @@ app.get('/api/produccion/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Registro no encontrado' });
     res.json(calcularKPIs(row));
   } catch (err) {
+    console.error('❌ Error en GET /api/produccion/:id:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -90,8 +92,28 @@ app.post('/api/produccion', (req, res) => {
     const db = getDb();
     const d  = req.body;
 
+    // LOG: mostrar datos recibidos para debug
+    console.log('📥 Datos recibidos (POST /api/produccion):', JSON.stringify(d));
+
+    // Validaciones de negocio
     const errores = validarRegistro(d);
-    if (errores.length > 0) return res.status(400).json({ errores });
+    if (errores.length > 0) {
+      console.warn('⚠️  Registro rechazado por errores de validación:', errores);
+      return res.status(400).json({ errores });
+    }
+
+    // ── Control de duplicados: no permitir mismo fecha+turno ──────────────
+    const existe = db.prepare(
+      'SELECT id FROM produccion WHERE fecha = ? AND turno = ?'
+    ).get(d.fecha, d.turno);
+
+    if (existe) {
+      console.warn(`⚠️  Intento de registro duplicado: fecha=${d.fecha} turno=${d.turno} (id existente: ${existe.id})`);
+      return res.status(409).json({
+        errores: [`Ya existe un registro para el turno "${d.turno}" del ${d.fecha} (id: ${existe.id}). Si querés modificarlo, usá la opción Editar.`]
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     const stmt = db.prepare(`
       INSERT INTO produccion
@@ -109,9 +131,12 @@ app.post('/api/produccion', (req, res) => {
       d.botellas_producidas, d.bidones_5L, d.bidones_10L
     );
 
+    console.log(`✅ Registro guardado correctamente (id: ${info.lastInsertRowid}, fecha: ${d.fecha}, turno: ${d.turno})`);
+
     const nuevo = db.prepare('SELECT * FROM produccion WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(calcularKPIs(nuevo));
   } catch (err) {
+    console.error('❌ Error en POST /api/produccion:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -121,9 +146,29 @@ app.put('/api/produccion/:id', (req, res) => {
   try {
     const db = getDb();
     const d  = req.body;
+    const id = parseInt(req.params.id);
+
+    console.log(`📥 Datos recibidos (PUT /api/produccion/${id}):`, JSON.stringify(d));
 
     const errores = validarRegistro(d);
-    if (errores.length > 0) return res.status(400).json({ errores });
+    if (errores.length > 0) {
+      console.warn('⚠️  Actualización rechazada por errores de validación:', errores);
+      return res.status(400).json({ errores });
+    }
+
+    // ── Control de duplicados al editar: verificar que el otro registro con
+    //    mismo fecha+turno no sea otro id diferente ─────────────────────────
+    const duplicado = db.prepare(
+      'SELECT id FROM produccion WHERE fecha = ? AND turno = ? AND id != ?'
+    ).get(d.fecha, d.turno, id);
+
+    if (duplicado) {
+      console.warn(`⚠️  Conflicto al editar: ya existe registro id=${duplicado.id} para fecha=${d.fecha} turno=${d.turno}`);
+      return res.status(409).json({
+        errores: [`Ya existe otro registro para el turno "${d.turno}" del ${d.fecha} (id: ${duplicado.id}).`]
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     const stmt = db.prepare(`
       UPDATE produccion SET
@@ -141,26 +186,33 @@ app.put('/api/produccion/:id', (req, res) => {
       d.motivo_parada || null, d.detalle_produccion || '',
       d.horas_totales, d.horas_produccion, d.horas_parados,
       d.botellas_producidas, d.bidones_5L, d.bidones_10L,
-      req.params.id
+      id
     );
 
     if (info.changes === 0) return res.status(404).json({ error: 'Registro no encontrado' });
 
-    const actualizado = db.prepare('SELECT * FROM produccion WHERE id = ?').get(req.params.id);
+    console.log(`✅ Registro actualizado correctamente (id: ${id})`);
+
+    const actualizado = db.prepare('SELECT * FROM produccion WHERE id = ?').get(id);
     res.json(calcularKPIs(actualizado));
   } catch (err) {
+    console.error('❌ Error en PUT /api/produccion/:id:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /api/produccion/:id
+// DELETE /api/produccion/:id  — elimina SOLO el registro indicado (nunca tabla completa)
 app.delete('/api/produccion/:id', (req, res) => {
   try {
     const db   = getDb();
-    const info = db.prepare('DELETE FROM produccion WHERE id = ?').run(req.params.id);
+    const id   = parseInt(req.params.id);
+    console.log(`🗑️  Eliminando registro id: ${id}`);
+    const info = db.prepare('DELETE FROM produccion WHERE id = ?').run(id);
     if (info.changes === 0) return res.status(404).json({ error: 'Registro no encontrado' });
+    console.log(`✅ Registro id: ${id} eliminado`);
     res.json({ ok: true });
   } catch (err) {
+    console.error('❌ Error en DELETE /api/produccion/:id:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -169,12 +221,16 @@ app.delete('/api/produccion/:id', (req, res) => {
 // ADMIN – Limpiar todos los datos
 // ─────────────────────────────────────────────
 
-// POST /api/admin/reset  → elimina todos los registros y reinicia el ID
+// POST /api/admin/reset  → elimina TODOS los registros y reinicia el ID
+// ⚠️  USO MANUAL ÚNICAMENTE — no llamar desde el frontend en producción
 app.post('/api/admin/reset', (req, res) => {
   try {
+    console.warn('⚠️  RESET TOTAL solicitado vía API — se eliminarán TODOS los registros');
     resetData();
+    console.warn('✅ Base de datos reseteada');
     res.json({ ok: true, mensaje: 'Todos los datos de producción fueron eliminados.' });
   } catch (err) {
+    console.error('❌ Error en POST /api/admin/reset:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -246,6 +302,7 @@ app.get('/api/reportes/mensual', (req, res) => {
 
     res.json(resultado);
   } catch (err) {
+    console.error('❌ Error en GET /api/reportes/mensual:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -276,6 +333,7 @@ app.get('/api/reportes/acumulado', (req, res) => {
 
     res.json({ datos: rows, totales });
   } catch (err) {
+    console.error('❌ Error en GET /api/reportes/acumulado:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -330,6 +388,8 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 KPI Producción corriendo en http://localhost:${PORT}`);
+  console.log(`\n🚀 KPI Producción corriendo en http://localhost:${PORT}`);
+  console.log(`   Landing page:  http://localhost:${PORT}/`);
+  console.log(`   Sistema KPI:   http://localhost:${PORT}/app.html\n`);
   getDb(); // inicializar y migrar DB al arrancar
 });
