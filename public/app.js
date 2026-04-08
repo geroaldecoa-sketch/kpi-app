@@ -5,16 +5,16 @@
 const API = '/api';
 let chartHoras = null, chartProduccion = null, chartParadas = null;
 let idAEliminar = null;
-let registroDetalleActual = null;   // para PDF desde modal de detalle
-let datosMensualActuales  = null;   // para PDF reporte mensual
+let registroDetalleActual  = null;  // para PDF desde modal de detalle
+let datosMensualActuales   = null;  // para PDF reporte mensual
 let datosAcumuladoActuales = null;  // para PDF reporte acumulado
 let filtrosMensualActuales   = {};
 let filtrosAcumuladoActuales = {};
 
 const modalEliminar = new bootstrap.Modal(document.getElementById('modal-eliminar'));
 const modalDetalle  = new bootstrap.Modal(document.getElementById('modal-detalle'));
-const toastEl = document.getElementById('toast-notif');
-const bsToast = new bootstrap.Toast(toastEl, { delay: 3500 });
+const toastEl  = document.getElementById('toast-notif');
+const bsToast  = new bootstrap.Toast(toastEl, { delay: 3500 });
 
 // ─────────────────────────────────────────────
 // NAVEGACIÓN
@@ -32,9 +32,9 @@ document.querySelectorAll('.nav-tab').forEach(link => {
 function mostrarSeccion(id) {
   document.querySelectorAll('.app-section').forEach(s => s.classList.add('d-none'));
   document.getElementById(`section-${id}`).classList.remove('d-none');
-  if (id === 'listado')            cargarListado();
-  if (id === 'reporte-mensual')    inicializarFiltrosMensual();
-  if (id === 'reporte-acumulado')  inicializarFiltrosAcumulado();
+  if (id === 'listado')           cargarListado();
+  if (id === 'reporte-mensual')   inicializarFiltrosMensual();
+  if (id === 'reporte-acumulado') inicializarFiltrosAcumulado();
 }
 
 // ─────────────────────────────────────────────
@@ -115,7 +115,6 @@ function nuevoPDF(orientacion = 'p') {
 }
 
 function pdfHeader(doc, titulo, subtitulo = '') {
-  // Banda de color primario
   doc.setFillColor(0, 86, 179);
   doc.rect(0, 0, 210, 20, 'F');
   doc.setTextColor(255, 255, 255);
@@ -130,7 +129,7 @@ function pdfHeader(doc, titulo, subtitulo = '') {
     doc.text(subtitulo, 210 - 14, 15, { align: 'right' });
   }
   doc.setTextColor(0, 0, 0);
-  return 26; // y de inicio del contenido
+  return 26;
 }
 
 function pdfFooter(doc) {
@@ -161,6 +160,8 @@ function verDetalle(id, r) {
   const motivoBadge  = r.motivo_parada
     ? `<span class="badge bg-${r.motivo_parada==='Mantenimiento'?'warning text-dark':r.motivo_parada==='Corte de luz'?'danger':'info'}">${r.motivo_parada}</span>`
     : '<span class="text-muted">Sin parada</span>';
+
+  const totalBidones = (r.bidones_5L || 0) + (r.bidones_10L || 0);
 
   document.getElementById('detalle-modal-body').innerHTML = `
     <!-- Encabezado info -->
@@ -200,20 +201,17 @@ function verDetalle(id, r) {
             <table class="table table-sm table-borderless mb-0">
               <tbody>
                 <tr><td>Horas Producción</td><td class="text-end fw-semibold text-success">${r.horas_produccion} hs</td></tr>
-                <tr><td>Horas sin Producción</td><td class="text-end fw-semibold text-warning">${r.horas_sin_produccion} hs</td></tr>
                 <tr><td>Horas Parados</td><td class="text-end fw-semibold text-danger">${r.horas_parados} hs</td></tr>
                 <tr class="border-top"><td><strong>Horas Totales</strong></td><td class="text-end fw-bold">${r.horas_totales} hs</td></tr>
               </tbody>
             </table>
             <!-- Barra visual -->
-            <div class="progress mt-2" style="height:8px" title="Verde=Producción, Amarillo=s/Prod, Rojo=Parado">
+            <div class="progress mt-2" style="height:8px" title="Verde=Producción, Rojo=Parado">
               <div class="progress-bar bg-success" style="width:${fmt(r.pct_horas_activas)}%"></div>
-              <div class="progress-bar bg-warning" style="width:${fmt(r.pct_horas_sin_produccion)}%"></div>
-              <div class="progress-bar bg-danger" style="width:${fmt(r.pct_horas_paradas)}%"></div>
+              <div class="progress-bar bg-danger"  style="width:${fmt(r.pct_horas_paradas)}%"></div>
             </div>
             <div class="d-flex justify-content-between mt-1" style="font-size:0.7rem">
               <span class="text-success">Activas ${fmt(r.pct_horas_activas)}%</span>
-              <span class="text-warning">s/Prod ${fmt(r.pct_horas_sin_produccion)}%</span>
               <span class="text-danger">Paradas ${fmt(r.pct_horas_paradas)}%</span>
             </div>
           </div>
@@ -226,9 +224,12 @@ function verDetalle(id, r) {
             <table class="table table-sm table-borderless mb-0">
               <tbody>
                 <tr><td>Botellas producidas</td><td class="text-end fw-semibold">${r.botellas_producidas.toLocaleString('es-AR')}</td></tr>
-                <tr><td>Bidones producidos</td><td class="text-end fw-semibold">${r.bidones_producidos.toLocaleString('es-AR')}</td></tr>
+                <tr><td>Bidones 5L</td><td class="text-end fw-semibold">${(r.bidones_5L || 0).toLocaleString('es-AR')}</td></tr>
+                <tr><td>Bidones 10L</td><td class="text-end fw-semibold">${(r.bidones_10L || 0).toLocaleString('es-AR')}</td></tr>
+                <tr class="border-top"><td><strong>Total Bidones</strong></td><td class="text-end fw-bold">${totalBidones.toLocaleString('es-AR')}</td></tr>
                 <tr><td>Prom. Botellas/hora</td><td class="text-end fw-semibold text-primary">${fmt(r.prom_botellas_hora, 0)}</td></tr>
-                <tr><td>Prom. Bidones/hora</td><td class="text-end fw-semibold text-info">${fmt(r.prom_bidones_hora, 1)}</td></tr>
+                <tr><td>Prom. Bidones 5L/hora</td><td class="text-end fw-semibold text-info">${fmt(r.prom_bidones_5L_hora, 1)}</td></tr>
+                <tr><td>Prom. Bidones 10L/hora</td><td class="text-end fw-semibold text-info">${fmt(r.prom_bidones_10L_hora, 1)}</td></tr>
               </tbody>
             </table>
             <h6 class="text-secondary mb-1 mt-2"><i class="bi bi-clock-history me-1"></i>Horas por Producto</h6>
@@ -314,17 +315,16 @@ function descargarPDFRegistro(r) {
     startY: y,
     head: [['Concepto', 'Horas', '% del Total']],
     body: [
-      ['Horas Producción',       `${r.horas_produccion} hs`,       `${fmt(r.pct_horas_activas)}%`],
-      ['Horas sin Producción',   `${r.horas_sin_produccion} hs`,   `${fmt(r.pct_horas_sin_produccion)}%`],
-      ['Horas Parados',          `${r.horas_parados} hs`,          `${fmt(r.pct_horas_paradas)}%`],
-      ['HORAS TOTALES',          `${r.horas_totales} hs`,          '100%'],
+      ['Horas Producción', `${r.horas_produccion} hs`, `${fmt(r.pct_horas_activas)}%`],
+      ['Horas Parados',    `${r.horas_parados} hs`,    `${fmt(r.pct_horas_paradas)}%`],
+      ['HORAS TOTALES',    `${r.horas_totales} hs`,    '100%'],
     ],
     theme: 'striped',
     headStyles: { fillColor: [0, 120, 60], textColor: 255, fontStyle: 'bold', fontSize: 9 },
     bodyStyles: { fontSize: 9 },
     columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
     didParseCell: (data) => {
-      if (data.row.index === 3) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [220, 240, 220]; }
+      if (data.row.index === 2) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [220, 240, 220]; }
     },
     margin: { left: 14, right: 14 },
   });
@@ -336,17 +336,21 @@ function descargarPDFRegistro(r) {
   doc.text('PRODUCCIÓN Y KPIs', 16, y + 4.5);
   y += 8;
 
+  const totalBidones = (r.bidones_5L || 0) + (r.bidones_10L || 0);
+
   doc.autoTable({
     startY: y,
     head: [['Indicador', 'Valor']],
     body: [
-      ['Botellas Producidas',       r.botellas_producidas.toLocaleString('es-AR')],
-      ['Bidones Producidos',        r.bidones_producidos.toLocaleString('es-AR')],
-      ['Promedio Botellas / Hora',  `${fmt(r.prom_botellas_hora, 0)} bot/h`],
-      ['Promedio Bidones / Hora',   `${fmt(r.prom_bidones_hora, 1)} bid/h`],
-      ['% Horas Activas',           `${fmt(r.pct_horas_activas)}%`],
-      ['% Horas sin Producción',    `${fmt(r.pct_horas_sin_produccion)}%`],
-      ['% Horas Paradas',           `${fmt(r.pct_horas_paradas)}%`],
+      ['Botellas Producidas',         r.botellas_producidas.toLocaleString('es-AR')],
+      ['Bidones 5L',                  (r.bidones_5L  || 0).toLocaleString('es-AR')],
+      ['Bidones 10L',                 (r.bidones_10L || 0).toLocaleString('es-AR')],
+      ['Total Bidones',               totalBidones.toLocaleString('es-AR')],
+      ['Promedio Botellas / Hora',    `${fmt(r.prom_botellas_hora,    0)} bot/h`],
+      ['Promedio Bidones 5L / Hora',  `${fmt(r.prom_bidones_5L_hora,  1)} bid/h`],
+      ['Promedio Bidones 10L / Hora', `${fmt(r.prom_bidones_10L_hora, 1)} bid/h`],
+      ['% Horas Activas',             `${fmt(r.pct_horas_activas)}%`],
+      ['% Horas Paradas',             `${fmt(r.pct_horas_paradas)}%`],
     ],
     theme: 'striped',
     headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 9 },
@@ -390,17 +394,16 @@ function descargarPDFRegistro(r) {
 // ─────────────────────────────────────────────
 function actualizarSumaHoras() {
   const hp  = parseFloat(document.getElementById('f-horas-produccion').value) || 0;
-  const hsp = parseFloat(document.getElementById('f-horas-sin-produccion').value) || 0;
   const hpa = parseFloat(document.getElementById('f-horas-parados').value) || 0;
   const ht  = parseFloat(document.getElementById('f-horas-totales').value) || 0;
-  const suma = +(hp + hsp + hpa).toFixed(4);
+  const suma = +(hp + hpa).toFixed(4);
   const el = document.getElementById('validacion-horas');
   el.classList.remove('d-none');
 
   if (ht > 0) {
     const ok = Math.abs(suma - ht) <= 0.01;
     el.innerHTML = ok
-      ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${hp} + ${hsp} + ${hpa} = ${suma} hs ✔</span>`
+      ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${hp} + ${hpa} = ${suma} hs ✔</span>`
       : `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Suma = ${suma} hs ≠ Horas Totales (${ht} hs). Deben coincidir.</span>`;
   }
   actualizarKPIPreview();
@@ -408,23 +411,24 @@ function actualizarSumaHoras() {
 
 document.getElementById('f-horas-totales').addEventListener('input', actualizarSumaHoras);
 document.getElementById('f-botellas').addEventListener('input', actualizarKPIPreview);
-document.getElementById('f-bidones').addEventListener('input', actualizarKPIPreview);
+document.getElementById('f-bidones-5l').addEventListener('input', actualizarKPIPreview);
+document.getElementById('f-bidones-10l').addEventListener('input', actualizarKPIPreview);
 
 function actualizarKPIPreview() {
-  const ht  = parseFloat(document.getElementById('f-horas-totales').value) || 0;
-  const hp  = parseFloat(document.getElementById('f-horas-produccion').value) || 0;
-  const hsp = parseFloat(document.getElementById('f-horas-sin-produccion').value) || 0;
-  const hpa = parseFloat(document.getElementById('f-horas-parados').value) || 0;
-  const bot = parseFloat(document.getElementById('f-botellas').value) || 0;
-  const bid = parseFloat(document.getElementById('f-bidones').value) || 0;
+  const ht   = parseFloat(document.getElementById('f-horas-totales').value)   || 0;
+  const hp   = parseFloat(document.getElementById('f-horas-produccion').value) || 0;
+  const hpa  = parseFloat(document.getElementById('f-horas-parados').value)    || 0;
+  const bot  = parseFloat(document.getElementById('f-botellas').value)         || 0;
+  const bid5 = parseFloat(document.getElementById('f-bidones-5l').value)       || 0;
+  const bid10= parseFloat(document.getElementById('f-bidones-10l').value)      || 0;
   if (ht <= 0) return;
   const preview = document.getElementById('kpi-preview');
   preview.classList.remove('d-none');
-  document.getElementById('kpi-pct-activas').textContent = `% Activas: ${fmt(hp / ht * 100)}%`;
-  document.getElementById('kpi-pct-sp').textContent = `% s/Prod: ${fmt(hsp / ht * 100)}%`;
-  document.getElementById('kpi-pct-par').textContent = `% Paradas: ${fmt(hpa / ht * 100)}%`;
-  document.getElementById('kpi-prom-bot').textContent = hp > 0 ? fmt(bot / hp, 0) : '—';
-  document.getElementById('kpi-prom-bid').textContent = hp > 0 ? fmt(bid / hp, 1) : '—';
+  document.getElementById('kpi-pct-activas').textContent = `% Activas: ${fmt(hp  / ht * 100)}%`;
+  document.getElementById('kpi-pct-par').textContent     = `% Paradas: ${fmt(hpa / ht * 100)}%`;
+  document.getElementById('kpi-prom-bot').textContent    = hp > 0 ? fmt(bot  / hp, 0) : '—';
+  document.getElementById('kpi-prom-bid5').textContent   = hp > 0 ? fmt(bid5 / hp, 1) : '—';
+  document.getElementById('kpi-prom-bid10').textContent  = hp > 0 ? fmt(bid10/ hp, 1) : '—';
 }
 
 // ─────────────────────────────────────────────
@@ -438,17 +442,17 @@ document.getElementById('form-produccion').addEventListener('submit', async e =>
   const data = {
     fecha:               document.getElementById('f-fecha').value,
     turno:               document.getElementById('f-turno').value,
-    horas_bidones:       parseFloat(document.getElementById('f-horas-bidones').value) || 0,
+    horas_bidones:       parseFloat(document.getElementById('f-horas-bidones').value)  || 0,
     horas_botellas:      parseFloat(document.getElementById('f-horas-botellas').value) || 0,
     detalle_horas:       document.getElementById('f-detalle-horas').value.trim(),
     motivo_parada:       document.getElementById('f-motivo-parada').value || null,
     detalle_produccion:  document.getElementById('f-detalle-produccion').value.trim(),
     horas_totales:       parseFloat(document.getElementById('f-horas-totales').value),
     horas_produccion:    parseFloat(document.getElementById('f-horas-produccion').value),
-    horas_sin_produccion:parseFloat(document.getElementById('f-horas-sin-produccion').value),
     horas_parados:       parseFloat(document.getElementById('f-horas-parados').value),
-    botellas_producidas: parseInt(document.getElementById('f-botellas').value) || 0,
-    bidones_producidos:  parseInt(document.getElementById('f-bidones').value) || 0,
+    botellas_producidas: parseInt(document.getElementById('f-botellas').value)      || 0,
+    bidones_5L:          parseInt(document.getElementById('f-bidones-5l').value)    || 0,
+    bidones_10L:         parseInt(document.getElementById('f-bidones-10l').value)   || 0,
   };
 
   const editId = document.getElementById('edit-id').value;
@@ -494,18 +498,18 @@ function editarRegistro(id, d) {
   document.getElementById('edit-id').value = id;
   document.getElementById('f-fecha').value = d.fecha;
   document.getElementById('f-turno').value = d.turno;
-  document.getElementById('f-horas-bidones').value = d.horas_bidones;
+  document.getElementById('f-horas-bidones').value  = d.horas_bidones;
   document.getElementById('f-horas-botellas').value = d.horas_botellas;
-  document.getElementById('f-detalle-horas').value = d.detalle_horas || '';
-  document.getElementById('f-motivo-parada').value = d.motivo_parada || '';
+  document.getElementById('f-detalle-horas').value  = d.detalle_horas  || '';
+  document.getElementById('f-motivo-parada').value  = d.motivo_parada  || '';
   document.getElementById('f-detalle-produccion').value = d.detalle_produccion || '';
-  document.getElementById('f-horas-totales').value = d.horas_totales;
+  document.getElementById('f-horas-totales').value    = d.horas_totales;
   document.getElementById('f-horas-produccion').value = d.horas_produccion;
-  document.getElementById('f-horas-sin-produccion').value = d.horas_sin_produccion;
-  document.getElementById('f-horas-parados').value = d.horas_parados;
-  document.getElementById('f-botellas').value = d.botellas_producidas;
-  document.getElementById('f-bidones').value = d.bidones_producidos;
-  document.getElementById('form-title').textContent = `Editando Registro #${id}`;
+  document.getElementById('f-horas-parados').value    = d.horas_parados;
+  document.getElementById('f-botellas').value      = d.botellas_producidas;
+  document.getElementById('f-bidones-5l').value    = d.bidones_5L  || 0;
+  document.getElementById('f-bidones-10l').value   = d.bidones_10L || 0;
+  document.getElementById('form-title').textContent      = `Editando Registro #${id}`;
   document.getElementById('btn-submit-text').textContent = 'Actualizar Registro';
   document.getElementById('btn-cancelar-edicion').style.display = '';
   actualizarSumaHoras();
@@ -529,7 +533,7 @@ async function cargarListado() {
   tbody.innerHTML = '<tr><td colspan="14" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Cargando…</td></tr>';
 
   try {
-    const res = await apiGet(`${API}/produccion${qs}`);
+    const res  = await apiGet(`${API}/produccion${qs}`);
     const rows = res.data;
 
     if (rows.length === 0) {
@@ -538,17 +542,15 @@ async function cargarListado() {
       return;
     }
 
-    const motorParada = { 'Mantenimiento': 'warning', 'Falta de insumos': 'info', 'Corte de luz': 'danger' };
+    const colorParada = { 'Mantenimiento': 'warning', 'Falta de insumos': 'info', 'Corte de luz': 'danger' };
 
     tbody.innerHTML = rows.map(r => {
-      const rData = JSON.stringify(r).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return `
       <tr>
         <td>${fmtFecha(r.fecha)}</td>
         <td><span class="badge bg-secondary">${r.turno}</span></td>
         <td class="text-end">${fmt(r.horas_totales)}</td>
         <td class="text-end text-success fw-semibold">${fmt(r.horas_produccion)}</td>
-        <td class="text-end">${fmt(r.horas_sin_produccion)}</td>
         <td class="text-end">${fmt(r.horas_parados)}</td>
         <td class="text-end">
           <span class="badge bg-${r.pct_horas_activas >= 75 ? 'success' : r.pct_horas_activas >= 50 ? 'warning text-dark' : 'danger'}">
@@ -556,11 +558,13 @@ async function cargarListado() {
           </span>
         </td>
         <td class="text-end">${r.botellas_producidas.toLocaleString('es-AR')}</td>
-        <td class="text-end">${r.bidones_producidos.toLocaleString('es-AR')}</td>
-        <td class="text-end">${fmt(r.prom_botellas_hora, 0)}</td>
-        <td class="text-end">${fmt(r.prom_bidones_hora, 1)}</td>
+        <td class="text-end">${(r.bidones_5L  || 0).toLocaleString('es-AR')}</td>
+        <td class="text-end">${(r.bidones_10L || 0).toLocaleString('es-AR')}</td>
+        <td class="text-end">${fmt(r.prom_botellas_hora,    0)}</td>
+        <td class="text-end">${fmt(r.prom_bidones_5L_hora,  1)}</td>
+        <td class="text-end">${fmt(r.prom_bidones_10L_hora, 1)}</td>
         <td>${r.motivo_parada
-          ? `<span class="badge bg-${motorParada[r.motivo_parada] || 'secondary'}">${r.motivo_parada}</span>`
+          ? `<span class="badge bg-${colorParada[r.motivo_parada] || 'secondary'}">${r.motivo_parada}</span>`
           : '<span class="text-muted small">—</span>'}</td>
         <td class="text-center" style="white-space:nowrap">
           <button class="btn btn-xs btn-outline-info me-1" title="Ver detalle"
@@ -591,19 +595,20 @@ async function cargarListado() {
   }
 }
 
-// Actualizar colspan del thead también
+// Actualizar encabezado de la tabla del listado
 document.querySelector('#tabla-listado thead tr').innerHTML = `
   <th>Fecha</th>
   <th>Turno</th>
   <th class="text-end">Hs. Tot.</th>
   <th class="text-end">Hs. Prod.</th>
-  <th class="text-end">Hs. s/Prod.</th>
   <th class="text-end">Hs. Parados</th>
   <th class="text-end">% Activas</th>
   <th class="text-end">Botellas</th>
-  <th class="text-end">Bidones</th>
+  <th class="text-end">Bid 5L</th>
+  <th class="text-end">Bid 10L</th>
   <th class="text-end">Bot/h</th>
-  <th class="text-end">Bid/h</th>
+  <th class="text-end">5L/h</th>
+  <th class="text-end">10L/h</th>
   <th>Motivo Parada</th>
   <th class="text-center">Acciones</th>
 `;
@@ -683,7 +688,9 @@ async function cargarReporteMensual() {
 
     const labels      = datos.map(d => mesLabelCorto(d.mes));
     const totBotellas = datos.reduce((a, d) => a + d.botellas_producidas, 0);
-    const totBidones  = datos.reduce((a, d) => a + d.bidones_producidos, 0);
+    const totBid5L    = datos.reduce((a, d) => a + d.bidones_5L,  0);
+    const totBid10L   = datos.reduce((a, d) => a + d.bidones_10L, 0);
+    const totBidones  = totBid5L + totBid10L;
     const totHT       = datos.reduce((a, d) => a + d.horas_totales, 0);
     const totHP       = datos.reduce((a, d) => a + d.horas_produccion, 0);
     const avgActivas  = totHT > 0 ? (totHP / totHT * 100).toFixed(1) : 0;
@@ -713,7 +720,7 @@ async function cargarReporteMensual() {
         <div class="col-6 col-md-3">
           <div class="kpi-card border-info">
             <div class="kpi-value text-info">${totBidones.toLocaleString('es-AR')}</div>
-            <div class="kpi-label">Total Bidones</div>
+            <div class="kpi-label">Total Bidones (5L + 10L)</div>
           </div>
         </div>
         <div class="col-6 col-md-3">
@@ -743,7 +750,7 @@ async function cargarReporteMensual() {
       <div class="row g-4 mb-4">
         <div class="col-12">
           <div class="card shadow-sm">
-            <div class="card-header bg-white"><strong><i class="bi bi-bar-chart me-2 text-success"></i>Producción Mensual (Botellas y Bidones)</strong></div>
+            <div class="card-header bg-white"><strong><i class="bi bi-bar-chart me-2 text-success"></i>Producción Mensual (Botellas, Bidones 5L y 10L)</strong></div>
             <div class="card-body"><canvas id="chart-produccion"></canvas></div>
           </div>
         </div>
@@ -751,7 +758,7 @@ async function cargarReporteMensual() {
 
       <!-- Tabla KPI -->
       <div class="card shadow-sm">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <div class="card-header bg-white">
           <strong><i class="bi bi-table me-2 text-primary"></i>Tabla KPI Mensual</strong>
         </div>
         <div class="card-body p-0">
@@ -761,12 +768,14 @@ async function cargarReporteMensual() {
                 <tr>
                   <th>Mes</th>
                   <th class="text-end">% Hs. Activas</th>
-                  <th class="text-end">% Hs. s/Prod.</th>
                   <th class="text-end">% Hs. Paradas</th>
                   <th class="text-end">Bot/hora</th>
-                  <th class="text-end">Bid/hora</th>
+                  <th class="text-end">5L/hora</th>
+                  <th class="text-end">10L/hora</th>
                   <th class="text-end">Botellas</th>
-                  <th class="text-end">Bidones</th>
+                  <th class="text-end">Bid 5L</th>
+                  <th class="text-end">Bid 10L</th>
+                  <th class="text-end">Total Bid.</th>
                   <th class="text-end">P. Mant.</th>
                   <th class="text-end">P. Insumos</th>
                   <th class="text-end">P. Corte</th>
@@ -781,12 +790,14 @@ async function cargarReporteMensual() {
                         ${d.pct_horas_activas}%
                       </span>
                     </td>
-                    <td class="text-end">${d.pct_horas_sin_produccion}%</td>
                     <td class="text-end">${d.pct_horas_paradas}%</td>
-                    <td class="text-end">${fmt(d.prom_botellas_hora, 0)}</td>
-                    <td class="text-end">${fmt(d.prom_bidones_hora, 1)}</td>
+                    <td class="text-end">${fmt(d.prom_botellas_hora,    0)}</td>
+                    <td class="text-end">${fmt(d.prom_bidones_5L_hora,  1)}</td>
+                    <td class="text-end">${fmt(d.prom_bidones_10L_hora, 1)}</td>
                     <td class="text-end">${d.botellas_producidas.toLocaleString('es-AR')}</td>
-                    <td class="text-end">${d.bidones_producidos.toLocaleString('es-AR')}</td>
+                    <td class="text-end">${d.bidones_5L.toLocaleString('es-AR')}</td>
+                    <td class="text-end">${d.bidones_10L.toLocaleString('es-AR')}</td>
+                    <td class="text-end fw-semibold">${d.total_bidones.toLocaleString('es-AR')}</td>
                     <td class="text-end">${d.paradas_mantenimiento}</td>
                     <td class="text-end">${d.paradas_insumos}</td>
                     <td class="text-end">${d.paradas_corte}</td>
@@ -796,11 +807,13 @@ async function cargarReporteMensual() {
                 <tr>
                   <td>TOTALES</td>
                   <td class="text-end">${avgActivas}%</td>
-                  <td class="text-end">${totHT > 0 ? fmt(datos.reduce((a,d)=>a+d.horas_sin_produccion,0)/totHT*100) : '—'}%</td>
                   <td class="text-end">${totHT > 0 ? fmt(datos.reduce((a,d)=>a+d.horas_parados,0)/totHT*100) : '—'}%</td>
                   <td class="text-end">${totHP > 0 ? fmt(totBotellas/totHP, 0) : '—'}</td>
-                  <td class="text-end">${totHP > 0 ? fmt(totBidones/totHP, 1) : '—'}</td>
+                  <td class="text-end">${totHP > 0 ? fmt(totBid5L/totHP,   1) : '—'}</td>
+                  <td class="text-end">${totHP > 0 ? fmt(totBid10L/totHP,  1) : '—'}</td>
                   <td class="text-end">${totBotellas.toLocaleString('es-AR')}</td>
+                  <td class="text-end">${totBid5L.toLocaleString('es-AR')}</td>
+                  <td class="text-end">${totBid10L.toLocaleString('es-AR')}</td>
                   <td class="text-end">${totBidones.toLocaleString('es-AR')}</td>
                   <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_mantenimiento,0)}</td>
                   <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_insumos,0)}</td>
@@ -813,15 +826,14 @@ async function cargarReporteMensual() {
       </div>
     `;
 
-    // Gráfico horas apilado
+    // Gráfico horas apilado (2 datasets: activas + paradas)
     chartHoras = new Chart(document.getElementById('chart-horas'), {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: '% Hs. Activas',        data: datos.map(d => d.pct_horas_activas),        backgroundColor: 'rgba(40,167,69,0.8)' },
-          { label: '% Hs. s/Producción',   data: datos.map(d => d.pct_horas_sin_produccion), backgroundColor: 'rgba(255,193,7,0.8)' },
-          { label: '% Hs. Paradas',        data: datos.map(d => d.pct_horas_paradas),        backgroundColor: 'rgba(220,53,69,0.8)' },
+          { label: '% Hs. Activas', data: datos.map(d => d.pct_horas_activas), backgroundColor: 'rgba(40,167,69,0.8)' },
+          { label: '% Hs. Paradas', data: datos.map(d => d.pct_horas_paradas), backgroundColor: 'rgba(220,53,69,0.8)' },
         ]
       },
       options: {
@@ -831,14 +843,15 @@ async function cargarReporteMensual() {
       }
     });
 
-    // Gráfico producción
+    // Gráfico producción (botellas, bid5L, bid10L)
     chartProduccion = new Chart(document.getElementById('chart-produccion'), {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: 'Botellas producidas', data: datos.map(d => d.botellas_producidas), backgroundColor: 'rgba(0,123,255,0.8)', yAxisID: 'y' },
-          { label: 'Bidones producidos',  data: datos.map(d => d.bidones_producidos),  backgroundColor: 'rgba(23,162,184,0.8)', yAxisID: 'y2' },
+          { label: 'Botellas producidas', data: datos.map(d => d.botellas_producidas), backgroundColor: 'rgba(0,123,255,0.8)',   yAxisID: 'y'  },
+          { label: 'Bidones 5L',          data: datos.map(d => d.bidones_5L),          backgroundColor: 'rgba(23,162,184,0.8)',  yAxisID: 'y2' },
+          { label: 'Bidones 10L',         data: datos.map(d => d.bidones_10L),         backgroundColor: 'rgba(0,200,150,0.8)',   yAxisID: 'y2' },
         ]
       },
       options: {
@@ -894,12 +907,12 @@ function descargarPDFMensual() {
   let y = pdfHeader(doc, `Reporte KPI Mensual de Producción`,
     `Período: ${fmtFecha(desde)} al ${fmtFecha(hasta)}`);
 
-  // Totales generales
   const totBotellas = datos.reduce((a, d) => a + d.botellas_producidas, 0);
-  const totBidones  = datos.reduce((a, d) => a + d.bidones_producidos, 0);
+  const totBid5L    = datos.reduce((a, d) => a + d.bidones_5L,  0);
+  const totBid10L   = datos.reduce((a, d) => a + d.bidones_10L, 0);
+  const totBidones  = totBid5L + totBid10L;
   const totHT       = datos.reduce((a, d) => a + d.horas_totales, 0);
   const totHP       = datos.reduce((a, d) => a + d.horas_produccion, 0);
-  const totHSP      = datos.reduce((a, d) => a + d.horas_sin_produccion, 0);
   const totHPar     = datos.reduce((a, d) => a + d.horas_parados, 0);
   const avgActivas  = totHT > 0 ? (totHP / totHT * 100).toFixed(1) : 0;
   const totMant     = datos.reduce((a, d) => a + d.paradas_mantenimiento, 0);
@@ -909,17 +922,19 @@ function descargarPDFMensual() {
   // Tarjetas resumen
   doc.autoTable({
     startY: y,
-    head: [['% Hs. Activas', 'Total Botellas', 'Total Bidones', 'Total Horas', 'Meses analizados']],
+    head: [['% Hs. Activas', 'Total Botellas', 'Total Bid 5L', 'Total Bid 10L', 'Total Bidones', 'Total Horas', 'Meses analizados']],
     body: [[
       `${avgActivas}%`,
       totBotellas.toLocaleString('es-AR'),
+      totBid5L.toLocaleString('es-AR'),
+      totBid10L.toLocaleString('es-AR'),
       totBidones.toLocaleString('es-AR'),
       `${fmt(totHT, 0)} hs`,
       datos.length,
     ]],
     theme: 'grid',
-    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'center' },
-    bodyStyles: { fontSize: 11, fontStyle: 'bold', halign: 'center', fillColor: [240, 245, 255] },
+    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 8, halign: 'center' },
+    bodyStyles: { fontSize: 10, fontStyle: 'bold', halign: 'center', fillColor: [240, 245, 255] },
     margin: { left: 14, right: 14 },
   });
   y = doc.lastAutoTable.finalY + 8;
@@ -932,17 +947,19 @@ function descargarPDFMensual() {
 
   doc.autoTable({
     startY: y,
-    head: [['Mes', '% Activas', '% s/Prod.', '% Paradas', 'Bot/h', 'Bid/h', 'Botellas', 'Bidones', 'P.Mant.', 'P.Insum.', 'P.Corte']],
+    head: [['Mes', '% Activas', '% Paradas', 'Bot/h', '5L/h', '10L/h', 'Botellas', 'Bid 5L', 'Bid 10L', 'Total Bid.', 'P.Mant.', 'P.Insum.', 'P.Corte']],
     body: [
       ...datos.map(d => [
         mesLabel(d.mes),
         `${d.pct_horas_activas}%`,
-        `${d.pct_horas_sin_produccion}%`,
         `${d.pct_horas_paradas}%`,
-        fmt(d.prom_botellas_hora, 0),
-        fmt(d.prom_bidones_hora, 1),
+        fmt(d.prom_botellas_hora,    0),
+        fmt(d.prom_bidones_5L_hora,  1),
+        fmt(d.prom_bidones_10L_hora, 1),
         d.botellas_producidas.toLocaleString('es-AR'),
-        d.bidones_producidos.toLocaleString('es-AR'),
+        d.bidones_5L.toLocaleString('es-AR'),
+        d.bidones_10L.toLocaleString('es-AR'),
+        d.total_bidones.toLocaleString('es-AR'),
         d.paradas_mantenimiento,
         d.paradas_insumos,
         d.paradas_corte,
@@ -951,22 +968,24 @@ function descargarPDFMensual() {
       [
         'TOTALES',
         `${avgActivas}%`,
-        `${totHT>0 ? fmt(totHSP/totHT*100) : '—'}%`,
         `${totHT>0 ? fmt(totHPar/totHT*100) : '—'}%`,
         `${totHP>0 ? fmt(totBotellas/totHP, 0) : '—'}`,
-        `${totHP>0 ? fmt(totBidones/totHP, 1) : '—'}`,
+        `${totHP>0 ? fmt(totBid5L/totHP,   1) : '—'}`,
+        `${totHP>0 ? fmt(totBid10L/totHP,  1) : '—'}`,
         totBotellas.toLocaleString('es-AR'),
+        totBid5L.toLocaleString('es-AR'),
+        totBid10L.toLocaleString('es-AR'),
         totBidones.toLocaleString('es-AR'),
         totMant, totInsumos, totCorte,
       ]
     ],
     theme: 'striped',
-    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    bodyStyles: { fontSize: 8 },
+    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+    bodyStyles: { fontSize: 7 },
     columnStyles: {
-      1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' },
-      4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' },
-      7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' },
+      1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'},
+      5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}, 8:{halign:'right'},
+      9:{halign:'right'}, 10:{halign:'right'}, 11:{halign:'right'}, 12:{halign:'right'},
     },
     didParseCell: (data) => {
       if (data.row.index === datos.length) {
@@ -988,7 +1007,7 @@ function descargarPDFMensual() {
 
     doc.autoTable({
       startY: y,
-      head: [['Motivo de Parada', 'Cantidad de ocurrencias', '% del total']],
+      head: [['Motivo de Parada', 'Cant. ocurrencias', '% del total']],
       body: [
         ['Mantenimiento',    totMant,    `${(totMant    / totalP * 100).toFixed(1)}%`],
         ['Falta de insumos', totInsumos, `${(totInsumos / totalP * 100).toFixed(1)}%`],
@@ -1064,21 +1083,27 @@ async function cargarReporteAcumulado() {
 
     let filas = '';
     for (const [fecha, registros] of Object.entries(porFecha)) {
-      const subBot = registros.reduce((a, r) => a + r.botellas_producidas, 0);
-      const subBid = registros.reduce((a, r) => a + r.bidones_producidos, 0);
+      const subBot  = registros.reduce((a, r) => a + r.botellas_producidas, 0);
+      const subBid5 = registros.reduce((a, r) => a + r.bidones_5L, 0);
+      const subBid10= registros.reduce((a, r) => a + r.bidones_10L, 0);
       registros.forEach(r => {
+        const tot = (r.bidones_5L || 0) + (r.bidones_10L || 0);
         filas += `<tr>
           <td>${fmtFecha(r.fecha)}</td>
           <td><span class="badge bg-secondary">${r.turno}</span></td>
           <td class="text-end">${r.botellas_producidas.toLocaleString('es-AR')}</td>
-          <td class="text-end">${r.bidones_producidos.toLocaleString('es-AR')}</td>
+          <td class="text-end">${(r.bidones_5L  || 0).toLocaleString('es-AR')}</td>
+          <td class="text-end">${(r.bidones_10L || 0).toLocaleString('es-AR')}</td>
+          <td class="text-end fw-semibold">${tot.toLocaleString('es-AR')}</td>
         </tr>`;
       });
       if (registros.length > 1) {
         filas += `<tr class="table-light">
           <td colspan="2" class="text-end fw-semibold small text-muted">Subtotal ${fmtFecha(fecha)}</td>
           <td class="text-end fw-semibold">${subBot.toLocaleString('es-AR')}</td>
-          <td class="text-end fw-semibold">${subBid.toLocaleString('es-AR')}</td>
+          <td class="text-end fw-semibold">${subBid5.toLocaleString('es-AR')}</td>
+          <td class="text-end fw-semibold">${subBid10.toLocaleString('es-AR')}</td>
+          <td class="text-end fw-semibold">${(subBid5+subBid10).toLocaleString('es-AR')}</td>
         </tr>`;
       }
     }
@@ -1096,25 +1121,25 @@ async function cargarReporteAcumulado() {
         <div class="col-6 col-md-3">
           <div class="kpi-card border-primary">
             <div class="kpi-value text-primary">${totales.botellas.toLocaleString('es-AR')}</div>
-            <div class="kpi-label">Total Botellas Acumuladas</div>
+            <div class="kpi-label">Total Botellas</div>
           </div>
         </div>
         <div class="col-6 col-md-3">
           <div class="kpi-card border-info">
-            <div class="kpi-value text-info">${totales.bidones.toLocaleString('es-AR')}</div>
-            <div class="kpi-label">Total Bidones Acumulados</div>
+            <div class="kpi-value text-info">${totales.bidones_5L.toLocaleString('es-AR')}</div>
+            <div class="kpi-label">Total Bidones 5L</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="kpi-card border-success">
+            <div class="kpi-value text-success">${totales.bidones_10L.toLocaleString('es-AR')}</div>
+            <div class="kpi-label">Total Bidones 10L</div>
           </div>
         </div>
         <div class="col-6 col-md-3">
           <div class="kpi-card border-secondary">
             <div class="kpi-value text-secondary">${datos.length}</div>
             <div class="kpi-label">Turnos Registrados</div>
-          </div>
-        </div>
-        <div class="col-6 col-md-3">
-          <div class="kpi-card border-success">
-            <div class="kpi-value text-success">${Object.keys(porFecha).length}</div>
-            <div class="kpi-label">Días con Producción</div>
           </div>
         </div>
       </div>
@@ -1133,8 +1158,10 @@ async function cargarReporteAcumulado() {
               <thead class="table-primary">
                 <tr>
                   <th>Fecha</th><th>Turno</th>
-                  <th class="text-end">Botellas Producidas</th>
-                  <th class="text-end">Bidones Producidos</th>
+                  <th class="text-end">Botellas</th>
+                  <th class="text-end">Bidones 5L</th>
+                  <th class="text-end">Bidones 10L</th>
+                  <th class="text-end">Total Bidones</th>
                 </tr>
               </thead>
               <tbody>${filas}</tbody>
@@ -1142,7 +1169,9 @@ async function cargarReporteAcumulado() {
                 <tr>
                   <td colspan="2">TOTAL ACUMULADO</td>
                   <td class="text-end">${totales.botellas.toLocaleString('es-AR')}</td>
-                  <td class="text-end">${totales.bidones.toLocaleString('es-AR')}</td>
+                  <td class="text-end">${totales.bidones_5L.toLocaleString('es-AR')}</td>
+                  <td class="text-end">${totales.bidones_10L.toLocaleString('es-AR')}</td>
+                  <td class="text-end">${totales.bidones_total.toLocaleString('es-AR')}</td>
                 </tr>
               </tfoot>
             </table>
@@ -1171,22 +1200,24 @@ function descargarPDFAcumulado() {
     `Período: ${fmtFecha(desde)} al ${fmtFecha(hasta)}${turno ? ' · ' + turno : ''}`
   );
 
-  // Resumen
   const porFecha = {};
   datos.forEach(r => { if (!porFecha[r.fecha]) porFecha[r.fecha] = []; porFecha[r.fecha].push(r); });
 
+  // Resumen
   doc.autoTable({
     startY: y,
-    head: [['Total Botellas', 'Total Bidones', 'Turnos', 'Días']],
+    head: [['Total Botellas', 'Total Bid 5L', 'Total Bid 10L', 'Total Bidones', 'Turnos', 'Días']],
     body: [[
       totales.botellas.toLocaleString('es-AR'),
-      totales.bidones.toLocaleString('es-AR'),
+      totales.bidones_5L.toLocaleString('es-AR'),
+      totales.bidones_10L.toLocaleString('es-AR'),
+      totales.bidones_total.toLocaleString('es-AR'),
       datos.length,
       Object.keys(porFecha).length,
     ]],
     theme: 'grid',
-    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'center' },
-    bodyStyles: { fontSize: 11, fontStyle: 'bold', halign: 'center', fillColor: [240, 245, 255] },
+    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 8, halign: 'center' },
+    bodyStyles: { fontSize: 10, fontStyle: 'bold', halign: 'center', fillColor: [240, 245, 255] },
     margin: { left: 14, right: 14 },
   });
   y = doc.lastAutoTable.finalY + 8;
@@ -1201,18 +1232,36 @@ function descargarPDFAcumulado() {
   const bodyRows = [];
   for (const [fecha, registros] of Object.entries(porFecha)) {
     registros.forEach(r => {
-      bodyRows.push([fmtFecha(r.fecha), r.turno,
+      const tot = (r.bidones_5L || 0) + (r.bidones_10L || 0);
+      bodyRows.push([
+        fmtFecha(r.fecha), r.turno,
         r.botellas_producidas.toLocaleString('es-AR'),
-        r.bidones_producidos.toLocaleString('es-AR')]);
+        (r.bidones_5L  || 0).toLocaleString('es-AR'),
+        (r.bidones_10L || 0).toLocaleString('es-AR'),
+        tot.toLocaleString('es-AR'),
+      ]);
     });
     if (registros.length > 1) {
-      const subBot = registros.reduce((a, r) => a + r.botellas_producidas, 0);
-      const subBid = registros.reduce((a, r) => a + r.bidones_producidos, 0);
-      bodyRows.push([`Subtotal ${fmtFecha(fecha)}`, '', subBot.toLocaleString('es-AR'), subBid.toLocaleString('es-AR')]);
+      const subBot  = registros.reduce((a, r) => a + r.botellas_producidas, 0);
+      const subBid5 = registros.reduce((a, r) => a + r.bidones_5L,  0);
+      const subBid10= registros.reduce((a, r) => a + r.bidones_10L, 0);
+      bodyRows.push([
+        `Subtotal ${fmtFecha(fecha)}`, '',
+        subBot.toLocaleString('es-AR'),
+        subBid5.toLocaleString('es-AR'),
+        subBid10.toLocaleString('es-AR'),
+        (subBid5+subBid10).toLocaleString('es-AR'),
+      ]);
     }
   }
   // Fila total
-  bodyRows.push(['TOTAL ACUMULADO', '', totales.botellas.toLocaleString('es-AR'), totales.bidones.toLocaleString('es-AR')]);
+  bodyRows.push([
+    'TOTAL ACUMULADO', '',
+    totales.botellas.toLocaleString('es-AR'),
+    totales.bidones_5L.toLocaleString('es-AR'),
+    totales.bidones_10L.toLocaleString('es-AR'),
+    totales.bidones_total.toLocaleString('es-AR'),
+  ]);
 
   const subtotalIdxs = new Set();
   let idx = 0;
@@ -1223,12 +1272,12 @@ function descargarPDFAcumulado() {
 
   doc.autoTable({
     startY: y,
-    head: [['Fecha', 'Turno', 'Botellas Producidas', 'Bidones Producidos']],
+    head: [['Fecha', 'Turno', 'Botellas', 'Bidones 5L', 'Bidones 10L', 'Total Bidones']],
     body: bodyRows,
     theme: 'striped',
     headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 9 },
     bodyStyles: { fontSize: 9 },
-    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
     didParseCell: (data) => {
       const isLast = data.row.index === bodyRows.length - 1;
       const isSub  = subtotalIdxs.has(data.row.index);
