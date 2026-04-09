@@ -8,7 +8,9 @@ const { Pool } = require('pg');
 // ─────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('render.com')
+  // En producción (Render/Railway) siempre habilitar SSL.
+  // En local con PostgreSQL sin SSL, poner NODE_ENV=development
+  ssl: process.env.NODE_ENV !== 'development'
     ? { rejectUnauthorized: false }
     : false,
 });
