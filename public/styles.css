@@ -113,3 +113,53 @@ canvas {
     font-size: 0.78rem;
   }
 }
+
+/* ─── Carga: campos calculados ─── */
+.campo-calculado,
+.campo-calculado:focus {
+  background-color: #e9ecef;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+/* ─── Carga: operarios del turno (chips) ─── */
+.chip-operario .btn {
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+/* ─── Carga: grilla de paradas ─── */
+.paradas-head {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 0.25rem;
+}
+.paradas-head.oculto { display: none !important; }
+.fila-parada { margin-bottom: 0.5rem; }
+#f-paradas-body:not(:empty) { margin-bottom: 0.5rem; }
+@media (max-width: 767.98px) {
+  .fila-parada {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 0.5rem 0.25rem;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+/* ─── Paradas en listado ─── */
+.paradas-resumen .badge { font-weight: 500; }
+
+/* ─── Configuración: lista de operarios con scroll ─── */
+.tabla-scroll {
+  max-height: 440px;
+  overflow-y: auto;
+}
+.tabla-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}

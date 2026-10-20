@@ -21,65 +21,91 @@ kpi-sistema/
 - Node.js **v22** o superior (usa SQLite nativo incorporado)
 - npm
 
-## Instalación local
+## Correr en tu PC (sin deploy)
+
+Requisito: Node.js 18 o superior.
 
 ```bash
-cd kpi-sistema
-npm install
-npm start
-# Abre http://localhost:3000
+cd kpi-sistema-v2
+npm install        # la primera vez (descarga también un PostgreSQL portable)
+npm run local
+# Abrí http://localhost:3000/app.html
 ```
 
-Para desarrollo con auto-reinicio:
+`npm run local` levanta un PostgreSQL propio en el puerto 5433 y guarda los datos en
+`C:\Users\<usuario>\.kpi-produccion-local` (fuera de OneDrive). **No se conecta a la base de Render.**
+Para cortar: `Ctrl + C`. Para empezar con la base vacía: cerrá la app y borrá esa carpeta.
+
+### Probar con una copia de los datos de Render
+
 ```bash
-npm run dev
+npm run importar-render
 ```
 
-## Base de datos (SQLite)
+Pide la **External Database URL** (Render → base de datos → Connections), lee los datos de Render en modo
+**solo lectura** y los copia a la base local, adaptándolos al formato nuevo. Reemplaza la base local
+(cerrá la app antes). En Render no se modifica nada y la URL no se guarda.
 
-La base de datos se crea automáticamente en `kpi_produccion.db`. En producción se guarda en `/var/data/kpi_produccion.db` (disco persistente de Render).
+### Copia de seguridad de Render
 
-### Tabla `produccion`
+```bash
+npm run backup-render      # copia completa (solo lectura) en backups/render_AAAA-MM-DD_HHMMSS/
+npm run restaurar-backup   # restaura una copia en la base local (para revisar) o en Render
+```
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | INTEGER | Clave primaria autoincremental |
-| fecha | TEXT | Fecha en formato YYYY-MM-DD |
-| turno | TEXT | Mañana / Tarde / Noche |
-| horas_bidones | REAL | Horas trabajando con bidones |
-| horas_botellas | REAL | Horas trabajando con botellas |
-| detalle_horas | TEXT | Descripción libre de las horas |
-| motivo_parada | TEXT | Mantenimiento / Falta de insumos / Corte de luz |
-| detalle_produccion | TEXT | Novedades del turno |
-| horas_totales | REAL | Total de horas del turno |
-| horas_produccion | REAL | Horas activas produciendo |
-| horas_sin_produccion | REAL | Horas sin producción (sin parada) |
-| horas_parados | REAL | Horas detenidos |
-| botellas_producidas | INTEGER | Unidades de botellas producidas |
-| bidones_producidos | INTEGER | Unidades de bidones producidos |
+Cada copia trae `datos.json` (para restaurar con la app), `backup.sql` (restaurable con `psql`) y un CSV por tabla.
+Restaurar en Render pide escribir `RESTAURAR` y antes guarda una copia del estado actual.
+La carpeta `backups/` no se sube a git.
 
-**Validación clave:** `horas_produccion + horas_sin_produccion + horas_parados = horas_totales`
+`npm start` es el comando de producción (usa `DATABASE_URL`) y es el que corre Render.
+
+## Base de datos (PostgreSQL)
+
+Las tablas se crean solas al arrancar (`initSchema` en `database.js`). Los registros viejos se migran automáticamente: `motivo_parada` pasa a una fila en `paradas` (con las horas paradas en minutos) y `detalle_horas` + `detalle_produccion` pasan a `observaciones`.
+
+### Tablas
+
+| Tabla | Contenido |
+|-------|-----------|
+| `produccion` | Un registro por fecha + turno: horas, producción, `observaciones` |
+| `operarios` | ABM de operarios (nombre, apellido, DNI, activo). Se pueden importar desde Excel |
+| `grupos_operarios` / `grupo_operario_miembros` | Grupos de operarios para tildarlos juntos en la carga |
+| `motivos_parada` | ABM de motivos de parada (nombre, activo) |
+| `produccion_operarios` | Operarios que trabajaron en cada turno (N a N) |
+| `paradas` | Paradas de cada turno: motivo, detalle, minutos |
+
+**Horas calculadas:** `horas_parados = suma de minutos de las paradas / 60` y `horas_produccion = horas_totales − horas_parados`.
+
+Los operarios y motivos que ya se usaron no se pueden eliminar (se desactivan para que no aparezcan en la carga).
 
 ## KPIs calculados automáticamente
 
 | KPI | Fórmula |
 |-----|---------|
 | % Horas Activas | (horas_produccion / horas_totales) × 100 |
-| % Horas sin Producción | (horas_sin_produccion / horas_totales) × 100 |
 | % Horas Paradas | (horas_parados / horas_totales) × 100 |
 | Promedio Botellas/hora | botellas_producidas / horas_produccion |
-| Promedio Bidones/hora | bidones_producidos / horas_produccion |
+| Promedio Bidones/hora | bidones / horas_produccion |
+| Tiempo de parada por motivo | suma de minutos de `paradas` agrupado por motivo |
 
 ## API REST
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| GET | `/api/produccion` | Lista registros (filtros: fecha_desde, fecha_hasta, turno) |
+| GET | `/api/produccion` | Lista registros con operarios y paradas (filtros: fecha_desde, fecha_hasta, turno) |
 | GET | `/api/produccion/:id` | Un registro |
-| POST | `/api/produccion` | Crear registro |
+| POST | `/api/produccion` | Crear registro (`operario_ids: []`, `paradas: [{motivo_id, detalle, minutos}]`) |
 | PUT | `/api/produccion/:id` | Actualizar registro |
 | DELETE | `/api/produccion/:id` | Eliminar registro |
-| GET | `/api/reportes/mensual` | Reporte KPI mensual agrupado |
+| GET/POST | `/api/operarios` | Listar (`?activos=1`) / crear operario |
+| PUT/DELETE | `/api/operarios/:id` | Editar / eliminar operario |
+| POST | `/api/operarios/importar` | Importa operarios (`[{nombre, apellido, dni}]`): crea o actualiza por DNI |
+| GET/POST | `/api/grupos` | Listar / crear grupo (`{nombre, operario_ids}`) |
+| PUT/DELETE | `/api/grupos/:id` | Editar / eliminar grupo |
+| GET/POST | `/api/motivos` | Listar / crear motivo de parada |
+| PUT/DELETE | `/api/motivos/:id` | Editar / eliminar motivo |
+| GET | `/api/paradas/detalles` | Detalles ya usados (autocompletar) |
+| GET | `/api/reportes/mensual` | Reporte KPI mensual agrupado (incluye paradas por motivo) |
 | GET | `/api/reportes/acumulado` | Reporte acumulado por fecha/turno |
 
 ## Deploy en Render (gratis)

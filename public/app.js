@@ -4,7 +4,6 @@
 
 const API = '/api';
 let chartHoras = null, chartProduccion = null, chartParadas = null;
-let idAEliminar = null;
 let registroDetalleActual  = null;  // para PDF desde modal de detalle
 let datosMensualActuales   = null;  // para PDF reporte mensual
 let datosAcumuladoActuales = null;  // para PDF reporte acumulado
@@ -35,6 +34,7 @@ function mostrarSeccion(id) {
   if (id === 'listado')           cargarListado();
   if (id === 'reporte-mensual')   inicializarFiltrosMensual();
   if (id === 'reporte-acumulado') inicializarFiltrosAcumulado();
+  if (id === 'configuracion')     cargarConfiguracion();
 }
 
 // ─────────────────────────────────────────────
@@ -55,6 +55,13 @@ function fmtFecha(fechaISO) {
   if (!fechaISO) return '—';
   const [y, m, d] = fechaISO.split('-');
   return `${d}/${m}/${y}`;
+}
+
+// Color estable por motivo (según su id)
+const COLORES_MOTIVO = ['warning text-dark', 'info text-dark', 'danger', 'secondary', 'success', 'primary', 'dark'];
+function badgeMotivo(motivoId, nombre) {
+  const c = COLORES_MOTIVO[((parseInt(motivoId) || 1) - 1) % COLORES_MOTIVO.length];
+  return `<span class="badge bg-${c}">${esc(nombre)}</span>`;
 }
 
 function mesLabel(mesISO) {
@@ -80,30 +87,42 @@ function primerDiaSeisMesesAtras() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
+// Lee la respuesta como JSON; si el servidor devuelve otra cosa (p. ej. una página HTML), da un error entendible
+async function leerJSON(r) {
+  const texto = await r.text();
+  try {
+    return texto ? JSON.parse(texto) : {};
+  } catch (_) {
+    return { error: `El servidor respondió algo inesperado (${r.status}). Probá reiniciar la aplicación.` };
+  }
+}
+
 async function apiGet(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error((await r.json()).error || 'Error en la solicitud');
-  return r.json();
+  const json = await leerJSON(r);
+  if (!r.ok || json.error) throw new Error(json.error || (json.errores || []).join(' · ') || 'Error en la solicitud');
+  return json;
 }
 
 async function apiPost(url, data) {
   const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-  const json = await r.json();
-  if (!r.ok) throw json;
+  const json = await leerJSON(r);
+  if (!r.ok || (json.error && !Array.isArray(json))) throw json;
   return json;
 }
 
 async function apiPut(url, data) {
   const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-  const json = await r.json();
-  if (!r.ok) throw json;
+  const json = await leerJSON(r);
+  if (!r.ok || (json.error && !Array.isArray(json))) throw json;
   return json;
 }
 
 async function apiDelete(url) {
   const r = await fetch(url, { method: 'DELETE' });
-  if (!r.ok) throw new Error((await r.json()).error || 'Error al eliminar');
-  return r.json();
+  const json = await leerJSON(r);
+  if (!r.ok) throw new Error(json.error || 'Error al eliminar');
+  return json;
 }
 
 // ─────────────────────────────────────────────
@@ -115,8 +134,9 @@ function nuevoPDF(orientacion = 'p') {
 }
 
 function pdfHeader(doc, titulo, subtitulo = '') {
+  const ancho = doc.internal.pageSize.getWidth();
   doc.setFillColor(0, 86, 179);
-  doc.rect(0, 0, 210, 20, 'F');
+  doc.rect(0, 0, ancho, 20, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
@@ -126,7 +146,7 @@ function pdfHeader(doc, titulo, subtitulo = '') {
   doc.text(titulo, 14, 15);
   if (subtitulo) {
     doc.setFontSize(9);
-    doc.text(subtitulo, 210 - 14, 15, { align: 'right' });
+    doc.text(subtitulo, ancho - 14, 15, { align: 'right' });
   }
   doc.setTextColor(0, 0, 0);
   return 26;
@@ -134,16 +154,18 @@ function pdfHeader(doc, titulo, subtitulo = '') {
 
 function pdfFooter(doc) {
   const pageCount = doc.getNumberOfPages();
+  const ancho = doc.internal.pageSize.getWidth();
+  const alto  = doc.internal.pageSize.getHeight();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(150);
     doc.text(
       `Generado el ${new Date().toLocaleDateString('es-AR')} a las ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}   |   Página ${i} de ${pageCount}`,
-      14, 292
+      14, alto - 5
     );
     doc.setDrawColor(200);
-    doc.line(14, 289, 196, 289);
+    doc.line(14, alto - 8, ancho - 14, alto - 8);
     doc.setTextColor(0);
   }
 }
@@ -157,11 +179,6 @@ function verDetalle(id, r) {
     `<i class="bi bi-clipboard2-data me-2"></i>Detalle — ${fmtFecha(r.fecha)} · Turno ${r.turno}`;
 
   const colorActivas = r.pct_horas_activas >= 75 ? 'success' : r.pct_horas_activas >= 50 ? 'warning' : 'danger';
-  const _motivoColor = { 'Mantenimiento': 'warning text-dark', 'Corte de luz': 'danger', 'Falta de insumos': 'info', 'Otros': 'secondary' };
-  const motivoBadge  = r.motivo_parada
-    ? `<span class="badge bg-${_motivoColor[r.motivo_parada] || 'secondary'}">${r.motivo_parada}</span>`
-    : '<span class="text-muted">Sin parada</span>';
-
   const totalBidones = (r.bidones_5L || 0) + (r.bidones_10L || 0);
 
   document.getElementById('detalle-modal-body').innerHTML = `
@@ -245,31 +262,41 @@ function verDetalle(id, r) {
       </div>
     </div>
 
-    <!-- Parada y notas -->
-    <div class="row g-3">
-      <div class="col-md-4">
-        <div class="card border-0 bg-light">
-          <div class="card-body py-2">
-            <h6 class="text-secondary mb-1"><i class="bi bi-exclamation-triangle me-1"></i>Motivo de Parada</h6>
-            ${motivoBadge}
-          </div>
-        </div>
+    <!-- Operarios -->
+    <div class="card border-0 bg-light mb-3">
+      <div class="card-body py-2">
+        <h6 class="text-secondary mb-2"><i class="bi bi-people me-1"></i>Operarios del turno</h6>
+        ${(r.operarios || []).length
+          ? r.operarios.map(o => `<span class="badge rounded-pill text-bg-primary me-1 mb-1"><i class="bi bi-person me-1"></i>${esc(o.nombre)}</span>`).join('')
+          : '<em class="text-muted small">Sin operarios cargados</em>'}
       </div>
-      <div class="col-md-4">
-        <div class="card border-0 bg-light">
-          <div class="card-body py-2">
-            <h6 class="text-secondary mb-1"><i class="bi bi-chat-left-text me-1"></i>Detalle de Horas</h6>
-            <p class="mb-0 small">${r.detalle_horas || '<em class="text-muted">Sin detalle</em>'}</p>
-          </div>
-        </div>
+    </div>
+
+    <!-- Paradas -->
+    <div class="card border-0 bg-light mb-3">
+      <div class="card-body py-2">
+        <h6 class="text-secondary mb-2"><i class="bi bi-pause-circle me-1"></i>Paradas del turno</h6>
+        ${(r.paradas || []).length ? `
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Motivo</th><th>Detalle</th><th class="text-end">Tiempo</th></tr></thead>
+            <tbody>
+              ${r.paradas.map(p => `
+                <tr>
+                  <td>${badgeMotivo(p.motivo_id, p.motivo)}</td>
+                  <td>${p.detalle ? esc(p.detalle) : '<span class="text-muted">—</span>'}</td>
+                  <td class="text-end">${fmtMin(p.minutos)}</td>
+                </tr>`).join('')}
+            </tbody>
+            <tfoot><tr class="fw-bold"><td colspan="2">Total (${r.paradas.length} parada${r.paradas.length === 1 ? '' : 's'})</td><td class="text-end">${fmtMin(r.minutos_parada)}</td></tr></tfoot>
+          </table>` : '<em class="text-muted small">Sin paradas</em>'}
       </div>
-      <div class="col-md-4">
-        <div class="card border-0 bg-light">
-          <div class="card-body py-2">
-            <h6 class="text-secondary mb-1"><i class="bi bi-journal-text me-1"></i>Detalle Producción</h6>
-            <p class="mb-0 small">${r.detalle_produccion || '<em class="text-muted">Sin detalle</em>'}</p>
-          </div>
-        </div>
+    </div>
+
+    <!-- Observaciones -->
+    <div class="card border-0 bg-light">
+      <div class="card-body py-2">
+        <h6 class="text-secondary mb-1"><i class="bi bi-journal-text me-1"></i>Observaciones</h6>
+        <p class="mb-0 small" style="white-space:pre-line">${r.observaciones ? esc(r.observaciones) : '<em class="text-muted">Sin observaciones</em>'}</p>
       </div>
     </div>
   `;
@@ -361,29 +388,53 @@ function descargarPDFRegistro(r) {
   });
   y = doc.lastAutoTable.finalY + 6;
 
-  // Notas / textos libres
-  if (r.motivo_parada || r.detalle_horas || r.detalle_produccion) {
+  const seccionPDF = (titulo) => {
+    if (y > 260) { doc.addPage(); y = 20; }
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
     doc.setFillColor(230, 240, 255); doc.rect(14, y, 182, 6, 'F');
-    doc.text('OBSERVACIONES', 16, y + 4.5);
-    y += 10;
+    doc.text(titulo, 16, y + 4.5);
+    y += 8;
+  };
+
+  // Operarios
+  seccionPDF('OPERARIOS DEL TURNO');
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+  const ops = (r.operarios || []).map(o => o.nombre).join(', ') || 'Sin operarios cargados';
+  const opsLines = doc.splitTextToSize(ops, 180);
+  doc.text(opsLines, 14, y + 2);
+  y += opsLines.length * 5 + 4;
+
+  // Paradas
+  seccionPDF('PARADAS DEL TURNO');
+  if ((r.paradas || []).length) {
+    doc.autoTable({
+      startY: y,
+      head: [['Motivo', 'Detalle', 'Minutos']],
+      body: [
+        ...r.paradas.map(p => [p.motivo, p.detalle || '—', p.minutos]),
+        [`TOTAL (${r.paradas.length})`, '', `${r.minutos_parada} min (${fmt(r.minutos_parada / 60, 2)} hs)`],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { cellWidth: 50 }, 2: { halign: 'right', cellWidth: 45 } },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.row.index === r.paradas.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  } else {
     doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-    if (r.motivo_parada) {
-      doc.setFont('helvetica', 'bold'); doc.text('Motivo de Parada: ', 14, y);
-      doc.setFont('helvetica', 'normal'); doc.text(r.motivo_parada, 60, y); y += 6;
-    }
-    if (r.detalle_horas) {
-      doc.setFont('helvetica', 'bold'); doc.text('Detalle de Horas:', 14, y); y += 5;
-      doc.setFont('helvetica', 'normal');
-      const lines = doc.splitTextToSize(r.detalle_horas, 180);
-      doc.text(lines, 14, y); y += lines.length * 5 + 4;
-    }
-    if (r.detalle_produccion) {
-      doc.setFont('helvetica', 'bold'); doc.text('Detalle Producción:', 14, y); y += 5;
-      doc.setFont('helvetica', 'normal');
-      const lines = doc.splitTextToSize(r.detalle_produccion, 180);
-      doc.text(lines, 14, y);
-    }
+    doc.text('Sin paradas', 14, y + 2); y += 8;
+  }
+
+  // Observaciones
+  if (r.observaciones) {
+    seccionPDF('OBSERVACIONES');
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    const lines = doc.splitTextToSize(r.observaciones, 180);
+    doc.text(lines, 14, y + 2);
   }
 
   pdfFooter(doc);
@@ -391,26 +442,201 @@ function descargarPDFRegistro(r) {
 }
 
 // ─────────────────────────────────────────────
-// FORMULARIO ABM – VALIDACIÓN EN TIEMPO REAL
+// MAESTROS (operarios / motivos) – caché en memoria
 // ─────────────────────────────────────────────
-function actualizarSumaHoras() {
-  const hp  = parseFloat(document.getElementById('f-horas-produccion').value) || 0;
-  const hpa = parseFloat(document.getElementById('f-horas-parados').value) || 0;
-  const ht  = parseFloat(document.getElementById('f-horas-totales').value) || 0;
-  const suma = +(hp + hpa).toFixed(4);
-  const el = document.getElementById('validacion-horas');
-  el.classList.remove('d-none');
+let operarios = [];        // todos (activos e inactivos)
+let grupos    = [];        // grupos de operarios [{id, nombre, activo, operario_ids}]
+let motivos   = [];
+let detallesParada = [];   // [{motivo_id, detalle, usos}] para autocompletar
 
-  if (ht > 0) {
-    const ok = Math.abs(suma - ht) <= 0.01;
-    el.innerHTML = ok
-      ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${hp} + ${hpa} = ${suma} hs ✔</span>`
-      : `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Suma = ${suma} hs ≠ Horas Totales (${ht} hs). Deben coincidir.</span>`;
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtMin(min) {
+  min = parseInt(min) || 0;
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+async function cargarMaestros() {
+  try {
+    [operarios, motivos, detallesParada, grupos] = await Promise.all([
+      apiGet(`${API}/operarios`),
+      apiGet(`${API}/motivos`),
+      apiGet(`${API}/paradas/detalles`),
+      apiGet(`${API}/grupos`),
+    ]);
+  } catch (err) {
+    toast('No se pudieron cargar operarios / motivos: ' + err.message, 'danger');
+  }
+}
+
+// ─────────────────────────────────────────────
+// FORMULARIO – OPERARIOS DEL TURNO
+// ─────────────────────────────────────────────
+const nombreOperario = o => `${o.nombre} ${o.apellido || ''}`.trim();
+const nombreOperarioLista = o => o.apellido ? `${o.apellido}, ${o.nombre}` : o.nombre;
+
+function renderOperariosForm(seleccionados = null) {
+  const cont = document.getElementById('f-operarios');
+  const actuales = seleccionados ?? operariosSeleccionados();
+  const sel = new Set(actuales.map(Number));
+  // Activos + los inactivos que ya estaban asignados (al editar un registro viejo)
+  const lista = operarios.filter(o => o.activo || sel.has(o.id));
+
+  if (lista.length === 0) {
+    cont.innerHTML = `<span class="text-muted small">No hay operarios cargados.
+      <a href="#" onclick="irAConfiguracion(event)">Agregá operarios en Configuración</a>.</span>`;
+  } else {
+    cont.innerHTML = lista.map(o => `
+      <div class="chip-operario">
+        <input type="checkbox" class="btn-check" id="chk-op-${o.id}" value="${o.id}" autocomplete="off" ${sel.has(o.id) ? 'checked' : ''}>
+        <label class="btn btn-outline-primary" for="chk-op-${o.id}" title="${o.dni ? 'DNI ' + esc(o.dni) : ''}">
+          <i class="bi bi-person me-1"></i>${esc(nombreOperarioLista(o))}${o.activo ? '' : ' <small>(inactivo)</small>'}
+        </label>
+      </div>`).join('');
+  }
+  renderGruposRapidos();
+}
+
+// Botones de grupo en la carga: un clic tilda a todo el grupo (si ya estaban todos, los destilda)
+function renderGruposRapidos() {
+  const cont = document.getElementById('f-grupos');
+  const sel  = new Set(operariosSeleccionados());
+  const activosIds = new Set(operarios.filter(o => o.activo).map(o => o.id));
+  const lista = grupos.filter(g => g.activo && g.operario_ids.some(id => activosIds.has(id)));
+  document.getElementById('f-operarios-cant').textContent = sel.size;
+
+  if (lista.length === 0) {
+    cont.innerHTML = '';
+    cont.classList.add('d-none');
+    return;
+  }
+  cont.classList.remove('d-none');
+  cont.innerHTML = '<span class="small text-muted me-1"><i class="bi bi-diagram-3 me-1"></i>Grupos:</span>' +
+    lista.map(g => {
+      const miembros = g.operario_ids.filter(id => activosIds.has(id));
+      const completo = miembros.length > 0 && miembros.every(id => sel.has(id));
+      return `<button type="button" class="btn btn-sm ${completo ? 'btn-success' : 'btn-outline-success'} rounded-pill"
+                onclick="aplicarGrupo(${g.id})" title="${completo ? 'Quitar' : 'Tildar'} a ${miembros.length} operario${miembros.length === 1 ? '' : 's'}">
+                ${completo ? '<i class="bi bi-check2 me-1"></i>' : ''}${esc(g.nombre)} <span class="opacity-75">(${miembros.length})</span>
+              </button>`;
+    }).join('') +
+    (sel.size ? `<button type="button" class="btn btn-sm btn-link text-decoration-none text-secondary" onclick="limpiarOperariosForm()">Destildar todos</button>` : '');
+}
+
+function aplicarGrupo(grupoId) {
+  const g = grupos.find(x => x.id === grupoId);
+  if (!g) return;
+  const activosIds = new Set(operarios.filter(o => o.activo).map(o => o.id));
+  const miembros = g.operario_ids.filter(id => activosIds.has(id));
+  const sel = new Set(operariosSeleccionados());
+  const completo = miembros.every(id => sel.has(id));
+  miembros.forEach(id => {
+    const chk = document.getElementById(`chk-op-${id}`);
+    if (chk) chk.checked = !completo;
+  });
+  renderGruposRapidos();
+}
+
+function limpiarOperariosForm() {
+  document.querySelectorAll('#f-operarios input:checked').forEach(c => { c.checked = false; });
+  renderGruposRapidos();
+}
+
+document.getElementById('f-operarios').addEventListener('change', renderGruposRapidos);
+
+function operariosSeleccionados() {
+  return [...document.querySelectorAll('#f-operarios input:checked')].map(i => parseInt(i.value));
+}
+
+// ─────────────────────────────────────────────
+// FORMULARIO – PARADAS DEL TURNO
+// ─────────────────────────────────────────────
+function opcionesMotivo(seleccionado) {
+  const sel = parseInt(seleccionado) || null;
+  const lista = motivos.filter(m => m.activo || m.id === sel);
+  return '<option value="">— Seleccioná —</option>' +
+    lista.map(m => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(m.nombre)}${m.activo ? '' : ' (inactivo)'}</option>`).join('');
+}
+
+function agregarParada(p = {}) {
+  const tbody = document.getElementById('f-paradas-body');
+  const tr = document.createElement('div');
+  tr.className = 'row g-2 align-items-center fila-parada';
+  tr.innerHTML = `
+    <div class="col-12 col-md-4"><select class="form-select form-select-sm par-motivo" aria-label="Motivo">${opcionesMotivo(p.motivo_id)}</select></div>
+    <div class="col-12 col-md-5"><input type="text" class="form-control form-control-sm par-detalle" list="dl-detalles-parada"
+               maxlength="200" placeholder="Detalle (ej: Sopladora)" aria-label="Detalle" value="${esc(p.detalle || '')}"></div>
+    <div class="col-9 col-md-2">
+      <div class="input-group input-group-sm">
+        <input type="number" class="form-control par-minutos" min="1" step="1" placeholder="0" aria-label="Minutos" value="${p.minutos ?? ''}">
+        <span class="input-group-text">min</span>
+      </div>
+    </div>
+    <div class="col-3 col-md-1 text-end">
+      <button type="button" class="btn btn-sm btn-outline-danger" title="Quitar parada"><i class="bi bi-trash"></i></button>
+    </div>`;
+  tr.querySelector('.par-minutos').addEventListener('input', recalcularHoras);
+  tr.querySelector('.par-motivo').addEventListener('change', actualizarDatalistDetalles);
+  tr.querySelector('.par-detalle').addEventListener('focus', e => actualizarDatalistDetalles(e));
+  tr.querySelector('button').addEventListener('click', () => { tr.remove(); recalcularHoras(); });
+  tbody.appendChild(tr);
+  if (!p.motivo_id) tr.querySelector('.par-motivo').focus();
+  recalcularHoras();
+}
+
+// Sugiere detalles usados antes con el mismo motivo (o todos si no hay motivo elegido)
+function actualizarDatalistDetalles(e) {
+  const tr = e.target.closest('.fila-parada');
+  const motivoId = parseInt(tr.querySelector('.par-motivo').value) || null;
+  const vistos = new Set();
+  const opciones = detallesParada
+    .filter(d => !motivoId || d.motivo_id === motivoId)
+    .filter(d => !vistos.has(d.detalle.toLowerCase()) && vistos.add(d.detalle.toLowerCase()));
+  document.getElementById('dl-detalles-parada').innerHTML =
+    opciones.map(d => `<option value="${esc(d.detalle)}">`).join('');
+}
+
+function paradasDelFormulario() {
+  return [...document.querySelectorAll('#f-paradas-body .fila-parada')].map(tr => ({
+    motivo_id: parseInt(tr.querySelector('.par-motivo').value) || null,
+    detalle:   tr.querySelector('.par-detalle').value.trim(),
+    minutos:   parseInt(tr.querySelector('.par-minutos').value) || 0,
+  }));
+}
+
+// ─────────────────────────────────────────────
+// FORMULARIO – HORAS CALCULADAS + KPIs EN TIEMPO REAL
+// ─────────────────────────────────────────────
+function recalcularHoras() {
+  const paradas = paradasDelFormulario();
+  const minutos = paradas.reduce((a, p) => a + p.minutos, 0);
+  const ht      = parseFloat(document.getElementById('f-horas-totales').value);
+  const hpa     = minutos / 60;
+  const hp      = isNaN(ht) ? null : ht - hpa;
+
+  document.getElementById('f-paradas-vacio').classList.toggle('d-none', paradas.length > 0);
+  document.querySelector('.paradas-head').classList.toggle('oculto', paradas.length === 0);
+  document.getElementById('f-paradas-total').innerHTML =
+    `Total paradas: <strong>${paradas.length}</strong> · <strong>${minutos} min</strong>${minutos ? ` (${fmt(hpa, 2)} hs)` : ''}`;
+
+  document.getElementById('f-horas-parados').value    = fmt(hpa, 2);
+  document.getElementById('f-horas-produccion').value = hp === null ? '' : fmt(Math.max(0, hp), 2);
+
+  const el = document.getElementById('validacion-horas');
+  if (!isNaN(ht) && ht > 0 && hp < -0.001) {
+    el.classList.remove('d-none');
+    el.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Las paradas (${fmt(hpa, 2)} hs) superan las Horas Totales (${ht} hs).</span>`;
+  } else {
+    el.classList.add('d-none');
   }
   actualizarKPIPreview();
 }
 
-document.getElementById('f-horas-totales').addEventListener('input', actualizarSumaHoras);
+document.getElementById('f-horas-totales').addEventListener('input', recalcularHoras);
 document.getElementById('f-botellas').addEventListener('input', actualizarKPIPreview);
 document.getElementById('f-bidones-5l').addEventListener('input', actualizarKPIPreview);
 document.getElementById('f-bidones-10l').addEventListener('input', actualizarKPIPreview);
@@ -422,8 +648,8 @@ function actualizarKPIPreview() {
   const bot  = parseFloat(document.getElementById('f-botellas').value)         || 0;
   const bid5 = parseFloat(document.getElementById('f-bidones-5l').value)       || 0;
   const bid10= parseFloat(document.getElementById('f-bidones-10l').value)      || 0;
-  if (ht <= 0) return;
   const preview = document.getElementById('kpi-preview');
+  if (ht <= 0) { preview.classList.add('d-none'); return; }
   preview.classList.remove('d-none');
   document.getElementById('kpi-pct-activas').textContent = `% Activas: ${fmt(hp  / ht * 100)}%`;
   document.getElementById('kpi-pct-par').textContent     = `% Paradas: ${fmt(hpa / ht * 100)}%`;
@@ -433,50 +659,39 @@ function actualizarKPIPreview() {
 }
 
 // ─────────────────────────────────────────────
-// FORMULARIO ABM – SUBMIT
+// FORMULARIO – SUBMIT
 // ─────────────────────────────────────────────
 
 // Flag para prevenir doble envío
 let _enviandoFormulario = false;
 
 document.getElementById('form-produccion').addEventListener('submit', async e => {
-  // 1. Siempre prevenir el comportamiento por defecto del formulario
   e.preventDefault();
+  if (_enviandoFormulario) return;
 
-  // 2. Evitar doble envío: si ya se está procesando, ignorar el click adicional
-  if (_enviandoFormulario) {
-    console.warn('⚠️  Formulario ya en proceso de envío, se ignora click adicional');
-    return;
-  }
-
-  const alertEl  = document.getElementById('alert-form');
+  const alertEl   = document.getElementById('alert-form');
   const btnSubmit = document.getElementById('btn-submit');
   const btnText   = document.getElementById('btn-submit-text');
   alertEl.className = 'alert d-none';
-
-  // 3. Bloquear el botón y mostrar spinner mientras se procesa
-  _enviandoFormulario = true;
-  btnSubmit.disabled = true;
-  const textoOriginal = btnText.textContent;
-  btnText.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Guardando…';
 
   const data = {
     fecha:               document.getElementById('f-fecha').value,
     turno:               document.getElementById('f-turno').value,
     horas_bidones:       parseFloat(document.getElementById('f-horas-bidones').value)  || 0,
     horas_botellas:      parseFloat(document.getElementById('f-horas-botellas').value) || 0,
-    detalle_horas:       document.getElementById('f-detalle-horas').value.trim(),
-    motivo_parada:       document.getElementById('f-motivo-parada').value || null,
-    detalle_produccion:  document.getElementById('f-detalle-produccion').value.trim(),
-    horas_totales:       parseFloat(document.getElementById('f-horas-totales').value),
-    horas_produccion:    parseFloat(document.getElementById('f-horas-produccion').value),
-    horas_parados:       parseFloat(document.getElementById('f-horas-parados').value),
-    botellas_producidas: parseInt(document.getElementById('f-botellas').value)      || 0,
-    bidones_5L:          parseInt(document.getElementById('f-bidones-5l').value)    || 0,
-    bidones_10L:         parseInt(document.getElementById('f-bidones-10l').value)   || 0,
+    observaciones:       document.getElementById('f-observaciones').value.trim(),
+    horas_totales:       document.getElementById('f-horas-totales').value === '' ? '' : parseFloat(document.getElementById('f-horas-totales').value),
+    botellas_producidas: document.getElementById('f-botellas').value     === '' ? '' : parseInt(document.getElementById('f-botellas').value),
+    bidones_5L:          document.getElementById('f-bidones-5l').value   === '' ? '' : parseInt(document.getElementById('f-bidones-5l').value),
+    bidones_10L:         document.getElementById('f-bidones-10l').value  === '' ? '' : parseInt(document.getElementById('f-bidones-10l').value),
+    operario_ids:        operariosSeleccionados(),
+    paradas:             paradasDelFormulario(),
   };
 
-  console.log('📤 Enviando formulario:', JSON.stringify(data));
+  _enviandoFormulario = true;
+  btnSubmit.disabled = true;
+  const textoOriginal = btnText.textContent;
+  btnText.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Guardando…';
 
   const editId = document.getElementById('edit-id').value;
 
@@ -488,22 +703,19 @@ document.getElementById('form-produccion').addEventListener('submit', async e =>
       await apiPost(`${API}/produccion`, data);
       toast('✅ Registro guardado correctamente');
     }
+    cargarMaestros(); // refresca sugerencias de detalle y contadores de uso
     limpiarFormulario();
     mostrarSeccion('listado');
     document.querySelectorAll('.nav-tab').forEach(l => {
       l.classList.toggle('active', l.dataset.section === 'listado');
     });
   } catch (err) {
-    // 4. Mostrar errores sin borrar el formulario para que el usuario pueda corregir
-    const errores = err.errores || [err.error || 'Error desconocido'];
-    console.error('❌ Error al guardar registro:', errores);
+    const errores = err.errores || [err.error || err.message || 'Error desconocido'];
     alertEl.className = 'alert alert-danger';
     alertEl.innerHTML = '<strong>Errores:</strong><ul class="mb-0 mt-1">' +
-      errores.map(e => `<li>${e}</li>`).join('') + '</ul>';
-    // Hacer scroll al alert para que se vea el error
+      errores.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>';
     alertEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   } finally {
-    // 5. Siempre desbloquear el botón al terminar (éxito o error)
     _enviandoFormulario = false;
     btnSubmit.disabled = false;
     btnText.textContent = textoOriginal;
@@ -517,9 +729,10 @@ function limpiarFormulario() {
   document.getElementById('btn-submit-text').textContent = 'Guardar Registro';
   document.getElementById('btn-cancelar-edicion').style.display = 'none';
   document.getElementById('alert-form').className = 'alert d-none';
-  document.getElementById('validacion-horas').classList.add('d-none');
-  document.getElementById('kpi-preview').classList.add('d-none');
+  document.getElementById('f-paradas-body').innerHTML = '';
   document.getElementById('f-fecha').value = hoy();
+  renderOperariosForm([]);
+  recalcularHoras();
 }
 
 function cancelarEdicion() { limpiarFormulario(); }
@@ -527,26 +740,490 @@ function cancelarEdicion() { limpiarFormulario(); }
 function editarRegistro(id, d) {
   mostrarSeccion('carga');
   document.querySelectorAll('.nav-tab').forEach(l => l.classList.toggle('active', l.dataset.section === 'carga'));
+  limpiarFormulario();
   document.getElementById('edit-id').value = id;
   document.getElementById('f-fecha').value = d.fecha;
   document.getElementById('f-turno').value = d.turno;
   document.getElementById('f-horas-bidones').value  = d.horas_bidones;
   document.getElementById('f-horas-botellas').value = d.horas_botellas;
-  document.getElementById('f-detalle-horas').value  = d.detalle_horas  || '';
-  document.getElementById('f-motivo-parada').value  = d.motivo_parada  || '';
-  document.getElementById('f-detalle-produccion').value = d.detalle_produccion || '';
-  document.getElementById('f-horas-totales').value    = d.horas_totales;
-  document.getElementById('f-horas-produccion').value = d.horas_produccion;
-  document.getElementById('f-horas-parados').value    = d.horas_parados;
+  document.getElementById('f-observaciones').value  = d.observaciones || '';
+  document.getElementById('f-horas-totales').value  = d.horas_totales;
   document.getElementById('f-botellas').value      = d.botellas_producidas;
   document.getElementById('f-bidones-5l').value    = d.bidones_5L  || 0;
   document.getElementById('f-bidones-10l').value   = d.bidones_10L || 0;
+  renderOperariosForm((d.operarios || []).map(o => o.id));
+  (d.paradas || []).forEach(p => agregarParada(p));
   document.getElementById('form-title').textContent      = `Editando Registro #${id}`;
   document.getElementById('btn-submit-text').textContent = 'Actualizar Registro';
   document.getElementById('btn-cancelar-edicion').style.display = '';
-  actualizarSumaHoras();
+  recalcularHoras();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+function irAConfiguracion(e) {
+  if (e) e.preventDefault();
+  mostrarSeccion('configuracion');
+  document.querySelectorAll('.nav-tab').forEach(l => l.classList.toggle('active', l.dataset.section === 'configuracion'));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN – ABM OPERARIOS Y MOTIVOS
+// ─────────────────────────────────────────────
+const ABM = {
+  operarios: {
+    url: `${API}/operarios`, prefijo: 'op', tbody: 'tbody-operarios', etiqueta: 'Operario',
+    campos: ['nombre', 'apellido', 'dni'],
+    obligatorios: { nombre: 'El nombre es obligatorio', apellido: 'El apellido es obligatorio' },
+    columnas: 6,
+    fila: o => {
+      const gs = grupos.filter(g => g.operario_ids.includes(o.id));
+      return `
+      <td class="fw-semibold">${esc(nombreOperarioLista(o))}</td>
+      <td>${o.dni ? esc(Number(o.dni).toLocaleString('es-AR')) : '<span class="text-muted">—</span>'}</td>
+      <td>${gs.length ? gs.map(g => `<span class="badge text-bg-light border me-1">${esc(g.nombre)}</span>`).join('') : '<span class="text-muted">—</span>'}</td>
+      <td class="text-center">${o.usos}</td>`;
+    },
+    filtro: o => {
+      const q = (document.getElementById('op-buscar').value || '').trim().toLowerCase();
+      if (!q) return true;
+      return `${o.nombre} ${o.apellido} ${o.dni}`.toLowerCase().includes(q);
+    },
+    lista: () => operarios,
+  },
+  motivos: {
+    url: `${API}/motivos`, prefijo: 'mo', tbody: 'tbody-motivos', etiqueta: 'Motivo',
+    campos: ['nombre'],
+    columnas: 4,
+    fila: m => `
+      <td class="fw-semibold">${esc(m.nombre)}</td>
+      <td class="text-center">${m.usos}</td>`,
+    lista: () => motivos,
+  },
+};
+
+async function cargarConfiguracion() {
+  await cargarMaestros();
+  renderABM('operarios');
+  renderABM('motivos');
+  renderGruposABM();
+}
+
+function renderABM(tipo) {
+  const cfg   = ABM[tipo];
+  const todos = cfg.lista();
+  const lista = cfg.filtro ? todos.filter(cfg.filtro) : todos;
+  const cols  = cfg.columnas;
+  if (tipo === 'operarios') {
+    const activos = todos.filter(o => o.activo).length;
+    document.getElementById('op-contador').textContent =
+      `${todos.length} operario${todos.length === 1 ? '' : 's'} · ${activos} activo${activos === 1 ? '' : 's'}` +
+      (lista.length !== todos.length ? ` · mostrando ${lista.length}` : '');
+  }
+  document.getElementById(cfg.tbody).innerHTML = lista.length === 0
+    ? `<tr><td colspan="${cols}" class="text-center text-muted py-3">${todos.length ? 'Sin resultados para la búsqueda.' : 'Todavía no hay registros.'}</td></tr>`
+    : lista.map(x => `
+      <tr class="${x.activo ? '' : 'text-muted'}">
+        ${cfg.fila(x)}
+        <td class="text-center">
+          <div class="form-check form-switch d-inline-block mb-0">
+            <input class="form-check-input" type="checkbox" ${x.activo ? 'checked' : ''}
+              onchange="toggleActivoABM('${tipo}', ${x.id}, this.checked)" title="${x.activo ? 'Desactivar' : 'Activar'}">
+          </div>
+        </td>
+        <td class="text-center" style="white-space:nowrap">
+          <button class="btn btn-xs btn-outline-primary me-1" title="Editar" onclick="editarABM('${tipo}', ${x.id})"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-xs btn-outline-secondary" title="${x.usos > 0 ? 'En uso: desactivalo en lugar de eliminarlo' : 'Eliminar'}"
+            ${x.usos > 0 ? 'disabled' : ''} onclick="eliminarABM('${tipo}', ${x.id})"><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>`).join('');
+}
+
+function resetFormABM(tipo) {
+  const { prefijo } = ABM[tipo];
+  document.getElementById(`form-${tipo === 'operarios' ? 'operario' : 'motivo'}`).reset();
+  document.getElementById(`${prefijo}-id`).value = '';
+  document.querySelector(`#${prefijo}-btn span`).textContent = 'Agregar';
+  document.querySelector(`#${prefijo}-btn i`).className = 'bi bi-plus-lg me-1';
+  document.getElementById(`${prefijo}-cancelar`).classList.add('d-none');
+}
+
+function editarABM(tipo, id) {
+  const cfg = ABM[tipo];
+  const x = cfg.lista().find(i => i.id === id);
+  if (!x) return;
+  document.getElementById(`${cfg.prefijo}-id`).value = id;
+  cfg.campos.forEach(c => { document.getElementById(`${cfg.prefijo}-${c}`).value = x[c] || ''; });
+  document.querySelector(`#${cfg.prefijo}-btn span`).textContent = 'Guardar';
+  document.querySelector(`#${cfg.prefijo}-btn i`).className = 'bi bi-check-lg me-1';
+  document.getElementById(`${cfg.prefijo}-cancelar`).classList.remove('d-none');
+  document.getElementById(`${cfg.prefijo}-nombre`).focus();
+}
+
+async function guardarABM(tipo) {
+  const cfg = ABM[tipo];
+  const id  = document.getElementById(`${cfg.prefijo}-id`).value;
+  const data = {};
+  cfg.campos.forEach(c => { data[c] = document.getElementById(`${cfg.prefijo}-${c}`).value.trim(); });
+  const faltante = Object.entries(cfg.obligatorios || { nombre: 'El nombre es obligatorio' }).find(([c]) => !data[c]);
+  if (faltante) { toast(faltante[1], 'warning'); document.getElementById(`${cfg.prefijo}-${faltante[0]}`).focus(); return; }
+  const actual = id ? cfg.lista().find(i => i.id === parseInt(id)) : null;
+  data.activo = actual ? actual.activo : true;
+  try {
+    if (id) await apiPut(`${cfg.url}/${id}`, data);
+    else    await apiPost(cfg.url, data);
+    toast(`${cfg.etiqueta} ${id ? 'actualizado' : 'agregado'}`);
+    resetFormABM(tipo);
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  }
+}
+
+async function toggleActivoABM(tipo, id, activo) {
+  const cfg = ABM[tipo];
+  const x = cfg.lista().find(i => i.id === id);
+  if (!x) return;
+  const data = { activo };
+  cfg.campos.forEach(c => { data[c] = x[c] || ''; });
+  try {
+    await apiPut(`${cfg.url}/${id}`, data);
+    toast(`${cfg.etiqueta} ${activo ? 'activado' : 'desactivado'}`, activo ? 'success' : 'secondary');
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+    renderABM(tipo);
+  }
+}
+
+function eliminarABM(tipo, id) {
+  const cfg = ABM[tipo];
+  const x = cfg.lista().find(i => i.id === id);
+  if (!x) return;
+  pedirConfirmacion(`¿Confirmás que querés eliminar el ${cfg.etiqueta.toLowerCase()} <strong>${esc(x.nombre)}</strong>?`, async () => {
+    try {
+      await apiDelete(`${cfg.url}/${id}`);
+      toast(`${cfg.etiqueta} eliminado`, 'danger');
+      await cargarConfiguracion();
+      refrescarFormularioCarga();
+    } catch (err) {
+      toast(err.message, 'danger');
+    }
+  });
+}
+
+// Mantiene lo cargado en el formulario de producción pero con los maestros actualizados
+function refrescarFormularioCarga() {
+  renderOperariosForm(operariosSeleccionados());
+  document.querySelectorAll('#f-paradas-body .par-motivo').forEach(sel => {
+    const v = sel.value;
+    sel.innerHTML = opcionesMotivo(v);
+  });
+}
+
+document.getElementById('op-buscar').addEventListener('input', () => renderABM('operarios'));
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN – GRUPOS DE OPERARIOS
+// ─────────────────────────────────────────────
+function renderMiembrosGrupo(seleccionados = []) {
+  const sel = new Set(seleccionados.map(Number));
+  const lista = operarios.filter(o => o.activo || sel.has(o.id));
+  const cont = document.getElementById('gr-miembros');
+  cont.innerHTML = lista.length === 0
+    ? '<span class="text-muted small">Primero cargá o importá operarios.</span>'
+    : lista.map(o => `
+      <div class="chip-operario">
+        <input type="checkbox" class="btn-check" id="chk-gr-${o.id}" value="${o.id}" autocomplete="off" ${sel.has(o.id) ? 'checked' : ''}>
+        <label class="btn btn-sm btn-outline-success" for="chk-gr-${o.id}">${esc(nombreOperarioLista(o))}${o.activo ? '' : ' <small>(inactivo)</small>'}</label>
+      </div>`).join('');
+  actualizarContadorGrupo();
+}
+
+function miembrosGrupoSeleccionados() {
+  return [...document.querySelectorAll('#gr-miembros input:checked')].map(i => parseInt(i.value));
+}
+
+function actualizarContadorGrupo() {
+  const n = miembrosGrupoSeleccionados().length;
+  document.getElementById('gr-contador').textContent = `(${n} seleccionado${n === 1 ? '' : 's'})`;
+}
+
+function marcarTodosGrupo(valor) {
+  document.querySelectorAll('#gr-miembros input').forEach(c => { c.checked = valor; });
+  actualizarContadorGrupo();
+}
+
+function renderGruposABM() {
+  const porId = Object.fromEntries(operarios.map(o => [o.id, o]));
+  document.getElementById('tbody-grupos').innerHTML = grupos.length === 0
+    ? '<tr><td colspan="4" class="text-center text-muted py-3">Todavía no hay grupos.</td></tr>'
+    : grupos.map(g => {
+      const miembros = g.operario_ids.map(id => porId[id]).filter(Boolean);
+      return `
+      <tr class="${g.activo ? '' : 'text-muted'}">
+        <td class="fw-semibold">${esc(g.nombre)} <span class="badge rounded-pill text-bg-secondary ms-1">${miembros.length}</span></td>
+        <td class="small">${miembros.length ? miembros.map(o => esc(nombreOperario(o)) + (o.activo ? '' : ' <em>(inactivo)</em>')).join(', ') : '<span class="text-muted">Sin integrantes</span>'}</td>
+        <td class="text-center">
+          <div class="form-check form-switch d-inline-block mb-0">
+            <input class="form-check-input" type="checkbox" ${g.activo ? 'checked' : ''} onchange="toggleActivoGrupo(${g.id}, this.checked)">
+          </div>
+        </td>
+        <td class="text-center" style="white-space:nowrap">
+          <button class="btn btn-xs btn-outline-primary me-1" title="Editar" onclick="editarGrupo(${g.id})"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-xs btn-outline-secondary" title="Eliminar" onclick="eliminarGrupo(${g.id})"><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>`;
+    }).join('');
+  if (!document.getElementById('gr-id').value) renderMiembrosGrupo(miembrosGrupoSeleccionados());
+}
+
+function resetFormGrupo() {
+  document.getElementById('form-grupo').reset();
+  document.getElementById('gr-id').value = '';
+  document.querySelector('#gr-btn span').textContent = 'Crear grupo';
+  document.querySelector('#gr-btn i').className = 'bi bi-plus-lg me-1';
+  document.getElementById('gr-cancelar').classList.add('d-none');
+  renderMiembrosGrupo([]);
+}
+
+function editarGrupo(id) {
+  const g = grupos.find(x => x.id === id);
+  if (!g) return;
+  document.getElementById('gr-id').value = id;
+  document.getElementById('gr-nombre').value = g.nombre;
+  renderMiembrosGrupo(g.operario_ids);
+  document.querySelector('#gr-btn span').textContent = 'Guardar grupo';
+  document.querySelector('#gr-btn i').className = 'bi bi-check-lg me-1';
+  document.getElementById('gr-cancelar').classList.remove('d-none');
+  document.getElementById('form-grupo').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.getElementById('gr-nombre').focus();
+}
+
+async function guardarGrupo() {
+  const id = document.getElementById('gr-id').value;
+  const nombre = document.getElementById('gr-nombre').value.trim();
+  const operario_ids = miembrosGrupoSeleccionados();
+  if (!nombre) { toast('Poné un nombre al grupo', 'warning'); document.getElementById('gr-nombre').focus(); return; }
+  if (operario_ids.length === 0) { toast('Elegí al menos un integrante', 'warning'); return; }
+  const actual = id ? grupos.find(g => g.id === parseInt(id)) : null;
+  try {
+    const data = { nombre, operario_ids, activo: actual ? actual.activo : true };
+    if (id) await apiPut(`${API}/grupos/${id}`, data);
+    else    await apiPost(`${API}/grupos`, data);
+    toast(`Grupo ${id ? 'actualizado' : 'creado'}`);
+    await cargarConfiguracion();
+    resetFormGrupo();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  }
+}
+
+async function toggleActivoGrupo(id, activo) {
+  const g = grupos.find(x => x.id === id);
+  if (!g) return;
+  try {
+    await apiPut(`${API}/grupos/${id}`, { nombre: g.nombre, operario_ids: g.operario_ids, activo });
+    toast(`Grupo ${activo ? 'activado' : 'desactivado'}`, activo ? 'success' : 'secondary');
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  }
+}
+
+function eliminarGrupo(id) {
+  const g = grupos.find(x => x.id === id);
+  if (!g) return;
+  pedirConfirmacion(`¿Eliminar el grupo <strong>${esc(g.nombre)}</strong>? Los operarios no se borran.`, async () => {
+    try {
+      await apiDelete(`${API}/grupos/${id}`);
+      toast('Grupo eliminado', 'danger');
+      if (document.getElementById('gr-id').value === String(id)) resetFormGrupo();
+      await cargarConfiguracion();
+      refrescarFormularioCarga();
+    } catch (err) {
+      toast(err.message, 'danger');
+    }
+  });
+}
+
+document.getElementById('form-grupo').addEventListener('submit', e => { e.preventDefault(); guardarGrupo(); });
+document.getElementById('gr-cancelar').addEventListener('click', resetFormGrupo);
+document.getElementById('gr-miembros').addEventListener('change', actualizarContadorGrupo);
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN – IMPORTAR OPERARIOS DESDE EXCEL
+// Columnas esperadas (en cualquier orden): Nombre, Apellido, DNI
+// ─────────────────────────────────────────────
+const modalImportar = new bootstrap.Modal(document.getElementById('modal-importar'));
+let importacionPendiente = [];
+
+function textoCelda(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    if (v.richText) return v.richText.map(t => t.text).join('');
+    if (v.text !== undefined) return String(v.text);
+    if (v.result !== undefined) return String(v.result);
+  }
+  return String(v);
+}
+
+const normalizarEncabezado = s => textoCelda(s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+
+async function leerExcelOperarios(file) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('El archivo no tiene hojas');
+
+  // Buscar la fila de encabezados en las primeras 15 filas
+  let filaEnc = null, col = {};
+  for (let r = 1; r <= Math.min(15, ws.rowCount) && !filaEnc; r++) {
+    const c = {};
+    ws.getRow(r).eachCell({ includeEmpty: false }, (cell, n) => {
+      const t = normalizarEncabezado(cell.value);
+      if (t === 'nombre' || t === 'nombres')        c.nombre = n;
+      if (t === 'apellido' || t === 'apellidos')    c.apellido = n;
+      if (t === 'dni' || t === 'documento' || t === 'nro dni' || t === 'n° dni') c.dni = n;
+    });
+    if (c.nombre && c.apellido) { filaEnc = r; col = c; }
+  }
+  if (!filaEnc) throw new Error('No encontré las columnas "Nombre" y "Apellido". Usá la planilla modelo.');
+
+  const filas = [];
+  for (let r = filaEnc + 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    // Las celdas combinadas repiten el valor de la celda principal: se ignoran
+    const valor = n => { const c = row.getCell(n); return c.isMerged && c.master.address !== c.address ? '' : c.value; };
+    const limpiar = v => textoCelda(v).trim().replace(/\s+/g, ' ');
+    const nombre   = limpiar(valor(col.nombre));
+    const apellido = limpiar(valor(col.apellido));
+    const dniTxt   = col.dni ? textoCelda(valor(col.dni)) : '';
+    const dni      = dniTxt.replace(/\D/g, '');
+    if (!nombre && !apellido && !dni) continue; // fila vacía (o celda combinada del encabezado)
+    filas.push({ fila: r, nombre, apellido, dni });
+  }
+  return filas;
+}
+
+function analizarImportacion(filas) {
+  const porDni = Object.fromEntries(operarios.filter(o => o.dni).map(o => [o.dni, o]));
+  const porNombre = Object.fromEntries(operarios.map(o => [`${o.nombre}|${o.apellido}`.toLowerCase(), o]));
+  const vistosDni = new Set();
+  return filas.map(f => {
+    if (!f.nombre || !f.apellido) return { ...f, estado: 'error', detalle: 'Falta nombre o apellido' };
+    if (f.dni && (f.dni.length < 7 || f.dni.length > 9)) return { ...f, estado: 'error', detalle: 'DNI inválido' };
+    if (f.dni && vistosDni.has(f.dni)) return { ...f, estado: 'error', detalle: 'DNI repetido en el archivo' };
+    if (f.dni) vistosDni.add(f.dni);
+    const ex = (f.dni && porDni[f.dni]) || porNombre[`${f.nombre}|${f.apellido}`.toLowerCase()];
+    if (!ex) return { ...f, estado: 'nuevo', detalle: 'Se agrega' };
+    const cambia = ex.nombre !== f.nombre || ex.apellido !== f.apellido || (f.dni && ex.dni !== f.dni);
+    return cambia
+      ? { ...f, estado: 'actualiza', detalle: `Actualiza a ${esc(nombreOperarioLista(ex))}${ex.dni ? '' : ' (agrega DNI)'}` }
+      : { ...f, estado: 'igual', detalle: 'Ya está cargado' };
+  });
+}
+
+document.getElementById('op-import-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!window.ExcelJS) { toast('No se pudo cargar la librería de Excel. Revisá la conexión a internet.', 'danger'); return; }
+  try {
+    await cargarMaestros();
+    const filas = analizarImportacion(await leerExcelOperarios(file));
+    if (filas.length === 0) { toast('El archivo no tiene operarios', 'warning'); return; }
+    importacionPendiente = filas.filter(f => f.estado === 'nuevo' || f.estado === 'actualiza');
+
+    const cuenta = est => filas.filter(f => f.estado === est).length;
+    const badge = { nuevo: 'success', actualiza: 'primary', igual: 'secondary', error: 'danger' };
+    const etiqueta = { nuevo: 'Nuevo', actualiza: 'Actualiza', igual: 'Sin cambios', error: 'Error' };
+    document.getElementById('importar-body').innerHTML = `
+      <p class="mb-2 small text-muted"><i class="bi bi-file-earmark-excel me-1"></i>${esc(file.name)} · ${filas.length} fila${filas.length === 1 ? '' : 's'}</p>
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <span class="badge text-bg-success">${cuenta('nuevo')} nuevos</span>
+        <span class="badge text-bg-primary">${cuenta('actualiza')} a actualizar</span>
+        <span class="badge text-bg-secondary">${cuenta('igual')} sin cambios</span>
+        ${cuenta('error') ? `<span class="badge text-bg-danger">${cuenta('error')} con error (no se importan)</span>` : ''}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light"><tr><th>Fila</th><th>Apellido</th><th>Nombre</th><th>DNI</th><th>Estado</th></tr></thead>
+          <tbody>
+            ${filas.map(f => `
+              <tr class="${f.estado === 'error' ? 'table-danger' : ''}">
+                <td class="text-muted">${f.fila}</td>
+                <td>${esc(f.apellido) || '—'}</td>
+                <td>${esc(f.nombre) || '—'}</td>
+                <td>${f.dni ? Number(f.dni).toLocaleString('es-AR') : '—'}</td>
+                <td><span class="badge text-bg-${badge[f.estado]}">${etiqueta[f.estado]}</span>
+                    ${f.estado !== 'nuevo' && f.estado !== 'igual' ? `<span class="small text-muted ms-1">${f.detalle}</span>` : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    const btn = document.getElementById('btn-confirmar-importar');
+    btn.disabled = importacionPendiente.length === 0;
+    btn.querySelector('span').textContent = importacionPendiente.length
+      ? `Importar ${importacionPendiente.length} operario${importacionPendiente.length === 1 ? '' : 's'}`
+      : 'Nada para importar';
+    modalImportar.show();
+  } catch (err) {
+    toast('No se pudo leer el archivo: ' + err.message, 'danger');
+  }
+});
+
+document.getElementById('btn-confirmar-importar').addEventListener('click', async () => {
+  if (importacionPendiente.length === 0) return;
+  const btn = document.getElementById('btn-confirmar-importar');
+  btn.disabled = true;
+  try {
+    const r = await apiPost(`${API}/operarios/importar`, {
+      operarios: importacionPendiente.map(({ fila, nombre, apellido, dni }) => ({ fila, nombre, apellido, dni })),
+    });
+    modalImportar.hide();
+    const partes = [];
+    if (r.creados)      partes.push(`${r.creados} agregados`);
+    if (r.actualizados) partes.push(`${r.actualizados} actualizados`);
+    toast(`Importación lista: ${partes.join(', ') || 'sin cambios'}${r.errores.length ? ` · ${r.errores.length} con error` : ''}`);
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function descargarModeloOperarios() {
+  if (!window.ExcelJS) { toast('No se pudo cargar la librería de Excel. Revisá la conexión a internet.', 'danger'); return; }
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Operarios');
+  ws.columns = [
+    { header: 'Nombre',   key: 'nombre',   width: 26 },
+    { header: 'Apellido', key: 'apellido', width: 26 },
+    { header: 'DNI',      key: 'dni',      width: 14 },
+  ];
+  ws.getRow(1).eachCell(c => {
+    c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF198754' } };
+  });
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  // Si ya hay operarios, el modelo sale con ellos (sirve para corregir y volver a importar)
+  operarios.filter(o => o.activo).forEach(o => ws.addRow({ nombre: o.nombre, apellido: o.apellido, dni: o.dni ? Number(o.dni) : '' }));
+  if (operarios.length === 0) ws.addRow({ nombre: 'Juan Carlos', apellido: 'Pérez', dni: 30123456 });
+  const buffer = await wb.xlsx.writeBuffer();
+  descargarBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'modelo_operarios.xlsx');
+}
+
+document.getElementById('form-operario').addEventListener('submit', e => { e.preventDefault(); guardarABM('operarios'); });
+document.getElementById('form-motivo').addEventListener('submit',   e => { e.preventDefault(); guardarABM('motivos'); });
+document.getElementById('op-cancelar').addEventListener('click', () => resetFormABM('operarios'));
+document.getElementById('mo-cancelar').addEventListener('click', () => resetFormABM('motivos'));
 
 // ─────────────────────────────────────────────
 // LISTADO
@@ -562,19 +1239,21 @@ async function cargarListado() {
   if (turno) qs += `&turno=${encodeURIComponent(turno)}`;
 
   const tbody = document.getElementById('tbody-listado');
+  listadoActual = null;
+  document.querySelectorAll('.btn-export-listado').forEach(b => { b.disabled = true; });
   tbody.innerHTML = '<tr><td colspan="14" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Cargando…</td></tr>';
 
   try {
     const res  = await apiGet(`${API}/produccion${qs}`);
     const rows = res.data;
+    listadoActual = { rows, desde, hasta, turno };
+    document.querySelectorAll('.btn-export-listado').forEach(b => { b.disabled = rows.length === 0; });
 
     if (rows.length === 0) {
       tbody.innerHTML = '<tr><td colspan="14" class="text-center py-4 text-muted">No hay registros para mostrar.</td></tr>';
       document.getElementById('listado-info').textContent = '';
       return;
     }
-
-    const colorParada = { 'Mantenimiento': 'warning text-dark', 'Falta de insumos': 'info', 'Corte de luz': 'danger', 'Otros': 'secondary' };
 
     tbody.innerHTML = rows.map(r => {
       return `
@@ -595,15 +1274,20 @@ async function cargarListado() {
         <td class="text-end">${fmt(r.prom_botellas_hora,    0)}</td>
         <td class="text-end">${fmt(r.prom_bidones_5L_hora,  1)}</td>
         <td class="text-end">${fmt(r.prom_bidones_10L_hora, 1)}</td>
-        <td>${r.motivo_parada
-          ? `<span class="badge bg-${colorParada[r.motivo_parada] || 'secondary'}">${r.motivo_parada}</span>`
+        <td class="paradas-resumen">${r.cantidad_paradas
+          ? r.paradas.map(p => badgeMotivo(p.motivo_id, p.motivo)).join(' ') +
+            `<div class="small text-muted">${r.cantidad_paradas} · ${fmtMin(r.minutos_parada)}</div>`
           : '<span class="text-muted small">—</span>'}</td>
         <td class="text-center" style="white-space:nowrap">
           <button class="btn btn-xs btn-outline-info me-1" title="Ver detalle"
             onclick='verDetalle(${r.id}, JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(r))}")))'>
             <i class="bi bi-eye"></i>
           </button>
-          <button class="btn btn-xs btn-outline-danger me-1" title="Descargar PDF"
+          <button class="btn btn-xs btn-outline-success me-1" title="Descargar detalle en Excel"
+            onclick='descargarExcelTurno(JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(r))}")))'>
+            <i class="bi bi-file-earmark-excel"></i>
+          </button>
+          <button class="btn btn-xs btn-outline-danger me-1" title="Descargar detalle en PDF"
             onclick='descargarPDFRegistro(JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(r))}")))'>
             <i class="bi bi-file-earmark-pdf"></i>
           </button>
@@ -641,9 +1325,348 @@ document.querySelector('#tabla-listado thead tr').innerHTML = `
   <th class="text-end">Bot/h</th>
   <th class="text-end">5L/h</th>
   <th class="text-end">10L/h</th>
-  <th>Motivo Parada</th>
+  <th>Paradas</th>
   <th class="text-center">Acciones</th>
 `;
+
+// ─────────────────────────────────────────────
+// LISTADO – DESCARGA DEL DETALLE (Excel / PDF)
+// Exporta los turnos que se están viendo (respeta los filtros aplicados)
+// ─────────────────────────────────────────────
+let listadoActual = null; // { rows, desde, hasta, turno }
+
+function textoOperarios(r) {
+  return (r.operarios || []).map(o => o.nombre).join(', ');
+}
+
+function textoParadas(r) {
+  return (r.paradas || [])
+    .map(p => `${p.motivo}${p.detalle ? ' - ' + p.detalle : ''} - ${p.minutos} min`)
+    .join('\n');
+}
+
+function descripcionFiltros(f) {
+  const partes = [];
+  if (f.desde && f.desde === f.hasta) partes.push(`Fecha ${fmtFecha(f.desde)}`);
+  else if (f.desde && f.hasta) partes.push(`Del ${fmtFecha(f.desde)} al ${fmtFecha(f.hasta)}`);
+  else if (f.desde)       partes.push(`Desde el ${fmtFecha(f.desde)}`);
+  else if (f.hasta)       partes.push(`Hasta el ${fmtFecha(f.hasta)}`);
+  else                    partes.push('Todas las fechas');
+  partes.push(f.turno ? `Turno ${f.turno}` : 'Todos los turnos');
+  return partes.join(' · ');
+}
+
+function nombreArchivoListado(f, ext) {
+  const rango = [...new Set([f.desde, f.hasta].filter(Boolean))].map(d => d.replace(/-/g, '')).join('_') || hoy().replace(/-/g, '');
+  const turno = f.turno ? '_' + f.turno.normalize('NFD').replace(/[̀-ͯ]/g, '') : '';
+  return `KPI_Detalle_Turnos_${rango}${turno}.${ext}`;
+}
+
+// Paradas de los turnos listados agrupadas por motivo (mayor tiempo primero)
+function resumenParadasListado(rows) {
+  const map = {};
+  rows.forEach(r => (r.paradas || []).forEach(p => {
+    map[p.motivo] = map[p.motivo] || { motivo: p.motivo, cantidad: 0, minutos: 0 };
+    map[p.motivo].cantidad += 1;
+    map[p.motivo].minutos  += p.minutos;
+  }));
+  return Object.values(map).sort((x, y) => y.minutos - x.minutos);
+}
+
+function totalesListado(rows) {
+  const t = rows.reduce((a, r) => ({
+    ht: a.ht + r.horas_totales, hp: a.hp + r.horas_produccion, hpar: a.hpar + r.horas_parados,
+    bot: a.bot + r.botellas_producidas, b5: a.b5 + (r.bidones_5L || 0), b10: a.b10 + (r.bidones_10L || 0),
+    cantP: a.cantP + r.cantidad_paradas, minP: a.minP + r.minutos_parada,
+  }), { ht: 0, hp: 0, hpar: 0, bot: 0, b5: 0, b10: 0, cantP: 0, minP: 0 });
+  t.pctActivas = t.ht > 0 ? t.hp / t.ht * 100 : 0;
+  return t;
+}
+
+// ── EXCEL ──────────────────────────────────────
+async function descargarExcelListado(filtro = null) {
+  const f = filtro || listadoActual;
+  if (!f || f.rows.length === 0) { toast('No hay registros para exportar', 'warning'); return; }
+  if (!window.ExcelJS) { toast('No se pudo cargar la librería de Excel. Revisá la conexión a internet.', 'danger'); return; }
+
+  const rows = f.rows;
+  const AZUL = 'FF0056B3', GRIS = 'FFF2F2F2', AMARILLO = 'FFFFF3CD';
+  const borde = { top: { style: 'thin', color: { argb: 'FFD0D0D0' } }, bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+                  left: { style: 'thin', color: { argb: 'FFD0D0D0' } }, right: { style: 'thin', color: { argb: 'FFD0D0D0' } } };
+  const aFecha = iso => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'KPI Producción';
+  wb.created = new Date();
+
+  // Encabezado común de cada hoja: título, filtros y fila de títulos de columnas
+  function prepararHoja(ws, titulo, columnas) {
+    ws.columns = columnas.map(c => ({ key: c.key, width: c.width, style: c.style || {} }));
+    ws.mergeCells(1, 1, 1, columnas.length);
+    ws.getCell(1, 1).value = titulo;
+    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: AZUL } };
+    ws.mergeCells(2, 1, 2, columnas.length);
+    ws.getCell(2, 1).value = `${descripcionFiltros(f)}  ·  Generado el ${new Date().toLocaleString('es-AR')}`;
+    ws.getCell(2, 1).font = { italic: true, color: { argb: 'FF6C757D' } };
+    const head = ws.getRow(4);
+    columnas.forEach((c, i) => { head.getCell(i + 1).value = c.header; });
+    head.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AZUL } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = borde;
+    });
+    head.height = 30;
+    ws.views = [{ state: 'frozen', ySplit: 4 }];
+    ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+                     margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+    ws.pageSetup.printTitlesRow = '4:4';
+    return 5; // primera fila de datos
+  }
+
+  function estiloFilas(ws, desde, hasta, nCols) {
+    for (let i = desde; i <= hasta; i++) {
+      const row = ws.getRow(i);
+      for (let c = 1; c <= nCols; c++) {
+        const cell = row.getCell(c);
+        cell.border = borde;
+        cell.alignment = { ...(cell.alignment || {}), vertical: 'top', wrapText: true };
+      }
+    }
+  }
+
+  function filaTotal(ws, nroFila, nCols) {
+    const row = ws.getRow(nroFila);
+    for (let c = 1; c <= nCols; c++) {
+      const cell = row.getCell(c);
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } };
+      cell.border = borde;
+    }
+  }
+
+  // ── Hoja 1: Turnos (una fila por turno, con todo el detalle)
+  const wsT = wb.addWorksheet('Turnos');
+  const colsT = [
+    { header: 'Fecha',          key: 'fecha',   width: 12, style: { numFmt: 'dd/mm/yyyy' } },
+    { header: 'Turno',          key: 'turno',   width: 9 },
+    { header: 'Operarios',      key: 'ops',     width: 28 },
+    { header: 'Hs. Totales',    key: 'ht',      width: 9,  style: { numFmt: '0.00' } },
+    { header: 'Hs. Producción', key: 'hp',      width: 11, style: { numFmt: '0.00' } },
+    { header: 'Hs. Parados',    key: 'hpar',    width: 9,  style: { numFmt: '0.00' } },
+    { header: '% Activas',      key: 'pct',     width: 9,  style: { numFmt: '0.0%' } },
+    { header: 'Hs. Bidones',    key: 'hbid',    width: 9,  style: { numFmt: '0.00' } },
+    { header: 'Hs. Botellas',   key: 'hbot',    width: 9,  style: { numFmt: '0.00' } },
+    { header: 'Botellas',       key: 'bot',     width: 10, style: { numFmt: '#,##0' } },
+    { header: 'Bidones 5L',     key: 'b5',      width: 9,  style: { numFmt: '#,##0' } },
+    { header: 'Bidones 10L',    key: 'b10',     width: 9,  style: { numFmt: '#,##0' } },
+    { header: 'Bot/h',          key: 'both',    width: 8,  style: { numFmt: '#,##0' } },
+    { header: '5L/h',           key: 'b5h',     width: 7,  style: { numFmt: '0.0' } },
+    { header: '10L/h',          key: 'b10h',    width: 7,  style: { numFmt: '0.0' } },
+    { header: 'Cant. Paradas',  key: 'cantP',   width: 9 },
+    { header: 'Min. Parada',    key: 'minP',    width: 9,  style: { numFmt: '#,##0' } },
+    { header: 'Paradas (motivo - detalle - tiempo)', key: 'paradas', width: 42 },
+    { header: 'Observaciones',  key: 'obs',     width: 45 },
+  ];
+  let fila = prepararHoja(wsT, 'Detalle de turnos de producción', colsT);
+  const primeraT = fila;
+  rows.forEach(r => {
+    wsT.getRow(fila++).values = {
+      fecha: aFecha(r.fecha), turno: r.turno, ops: textoOperarios(r),
+      ht: r.horas_totales, hp: r.horas_produccion, hpar: r.horas_parados, pct: r.pct_horas_activas / 100,
+      hbid: r.horas_bidones, hbot: r.horas_botellas,
+      bot: r.botellas_producidas, b5: r.bidones_5L || 0, b10: r.bidones_10L || 0,
+      both: r.prom_botellas_hora, b5h: r.prom_bidones_5L_hora, b10h: r.prom_bidones_10L_hora,
+      cantP: r.cantidad_paradas, minP: r.minutos_parada,
+      paradas: textoParadas(r), obs: r.observaciones || '',
+    };
+  });
+  const ultimaT = fila - 1;
+  estiloFilas(wsT, primeraT, ultimaT, colsT.length);
+
+  // Totales con fórmulas (se recalculan si la gerencia filtra o edita)
+  const t = totalesListado(rows);
+  const rng = l => `${l}${primeraT}:${l}${ultimaT}`;
+  const sum = (l, res) => ({ formula: `SUM(${rng(l)})`, result: res });
+  const rowTot = wsT.getRow(fila);
+  rowTot.values = {
+    fecha: 'TOTALES', ops: `${rows.length} turno${rows.length === 1 ? '' : 's'}`,
+    ht: sum('D', t.ht), hp: sum('E', t.hp), hpar: sum('F', t.hpar),
+    pct: { formula: `IF(D${fila}>0,E${fila}/D${fila},0)`, result: t.pctActivas / 100 },
+    bot: sum('J', t.bot), b5: sum('K', t.b5), b10: sum('L', t.b10),
+    both: { formula: `IF(E${fila}>0,J${fila}/E${fila},0)`, result: t.hp > 0 ? t.bot / t.hp : 0 },
+    b5h:  { formula: `IF(E${fila}>0,K${fila}/E${fila},0)`, result: t.hp > 0 ? t.b5 / t.hp : 0 },
+    b10h: { formula: `IF(E${fila}>0,L${fila}/E${fila},0)`, result: t.hp > 0 ? t.b10 / t.hp : 0 },
+    cantP: sum('P', t.cantP), minP: sum('Q', t.minP),
+  };
+  filaTotal(wsT, fila, colsT.length);
+  wsT.autoFilter = { from: { row: 4, column: 1 }, to: { row: ultimaT, column: colsT.length } };
+
+  // ── Hoja 2: Paradas (una fila por parada)
+  const wsP = wb.addWorksheet('Paradas');
+  const colsP = [
+    { header: 'Fecha',   key: 'fecha',   width: 12, style: { numFmt: 'dd/mm/yyyy' } },
+    { header: 'Turno',   key: 'turno',   width: 9 },
+    { header: 'Motivo',  key: 'motivo',  width: 22 },
+    { header: 'Detalle', key: 'detalle', width: 40 },
+    { header: 'Minutos', key: 'min',     width: 10, style: { numFmt: '#,##0' } },
+    { header: 'Horas',   key: 'hs',      width: 9,  style: { numFmt: '0.00' } },
+  ];
+  fila = prepararHoja(wsP, 'Paradas por turno', colsP);
+  const primeraP = fila;
+  rows.forEach(r => (r.paradas || []).forEach(p => {
+    wsP.getRow(fila).values = {
+      fecha: aFecha(r.fecha), turno: r.turno, motivo: p.motivo, detalle: p.detalle || '',
+      min: p.minutos, hs: { formula: `E${fila}/60`, result: p.minutos / 60 },
+    };
+    fila++;
+  }));
+  const ultimaP = fila - 1;
+  if (ultimaP >= primeraP) {
+    estiloFilas(wsP, primeraP, ultimaP, colsP.length);
+    wsP.getRow(fila).values = {
+      fecha: 'TOTAL', min: { formula: `SUM(E${primeraP}:E${ultimaP})`, result: t.minP },
+      hs: { formula: `E${fila}/60`, result: t.minP / 60 },
+    };
+    filaTotal(wsP, fila, colsP.length);
+    wsP.autoFilter = { from: { row: 4, column: 1 }, to: { row: ultimaP, column: colsP.length } };
+  } else {
+    wsP.getCell(primeraP, 1).value = 'Sin paradas en los turnos listados';
+  }
+
+  // ── Hoja 3: Resumen de paradas por motivo
+  const wsR = wb.addWorksheet('Resumen paradas');
+  const colsR = [
+    { header: 'Motivo',               key: 'motivo', width: 26 },
+    { header: 'Cant. paradas',        key: 'cant',   width: 12 },
+    { header: 'Minutos',              key: 'min',    width: 11, style: { numFmt: '#,##0' } },
+    { header: 'Horas',                key: 'hs',     width: 9,  style: { numFmt: '0.00' } },
+    { header: '% del tiempo parado',  key: 'pct',    width: 14, style: { numFmt: '0.0%' } },
+  ];
+  fila = prepararHoja(wsR, 'Resumen de paradas por motivo', colsR);
+  const primeraR = fila;
+  const resumen = resumenParadasListado(rows);
+  const filaTotR = primeraR + resumen.length;
+  resumen.forEach(p => {
+    wsR.getRow(fila).values = {
+      motivo: p.motivo, cant: p.cantidad, min: p.minutos,
+      hs:  { formula: `C${fila}/60`, result: p.minutos / 60 },
+      pct: { formula: `IF($C$${filaTotR}>0,C${fila}/$C$${filaTotR},0)`, result: t.minP ? p.minutos / t.minP : 0 },
+    };
+    fila++;
+  });
+  if (resumen.length) {
+    estiloFilas(wsR, primeraR, fila - 1, colsR.length);
+    wsR.getRow(fila).values = {
+      motivo: 'TOTAL',
+      cant: { formula: `SUM(B${primeraR}:B${fila - 1})`, result: t.cantP },
+      min:  { formula: `SUM(C${primeraR}:C${fila - 1})`, result: t.minP },
+      hs:   { formula: `C${fila}/60`, result: t.minP / 60 },
+      pct:  { formula: `IF(C${fila}>0,1,0)`, result: t.minP ? 1 : 0 },
+    };
+    filaTotal(wsR, fila, colsR.length);
+  } else {
+    wsR.getCell(primeraR, 1).value = 'Sin paradas en los turnos listados';
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  descargarBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    nombreArchivoListado(f, 'xlsx'));
+  toast('Excel descargado correctamente');
+}
+
+// Excel de un solo turno (botón de cada fila del listado)
+function descargarExcelTurno(r) {
+  descargarExcelListado({ rows: [r], desde: r.fecha, hasta: r.fecha, turno: r.turno });
+}
+
+function descargarBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── PDF ────────────────────────────────────────
+function descargarPDFListado() {
+  const f = listadoActual;
+  if (!f || f.rows.length === 0) { toast('No hay registros para exportar', 'warning'); return; }
+
+  const rows = f.rows;
+  const t = totalesListado(rows);
+  const doc = nuevoPDF('l');
+  let y = pdfHeader(doc, 'Detalle de Turnos de Producción', descripcionFiltros(f));
+
+  doc.autoTable({
+    startY: y,
+    head: [['Fecha', 'Turno', 'Operarios', 'Hs. Tot.', 'Hs. Prod.', 'Hs. Par.', '% Act.', 'Botellas', 'Bid 5L', 'Bid 10L', 'Paradas (motivo - detalle - tiempo)', 'Observaciones']],
+    body: [
+      ...rows.map(r => [
+        fmtFecha(r.fecha), r.turno, textoOperarios(r) || '—',
+        fmt(r.horas_totales, 2), fmt(r.horas_produccion, 2), fmt(r.horas_parados, 2), `${fmt(r.pct_horas_activas)}%`,
+        r.botellas_producidas.toLocaleString('es-AR'), (r.bidones_5L || 0).toLocaleString('es-AR'), (r.bidones_10L || 0).toLocaleString('es-AR'),
+        r.cantidad_paradas ? `${textoParadas(r)}\nTotal: ${fmtMin(r.minutos_parada)}` : 'Sin paradas',
+        r.observaciones || '—',
+      ]),
+      [
+        'TOTALES', `${rows.length}`, '',
+        fmt(t.ht, 2), fmt(t.hp, 2), fmt(t.hpar, 2), `${fmt(t.pctActivas)}%`,
+        t.bot.toLocaleString('es-AR'), t.b5.toLocaleString('es-AR'), t.b10.toLocaleString('es-AR'),
+        `${t.cantP} parada${t.cantP === 1 ? '' : 's'} · ${fmtMin(t.minP)}`, '',
+      ],
+    ],
+    theme: 'grid',
+    headStyles: { fillColor: [0, 86, 179], textColor: 255, fontStyle: 'bold', fontSize: 7.5, valign: 'middle' },
+    bodyStyles: { fontSize: 7.5, valign: 'top', cellPadding: 1.5 },
+    alternateRowStyles: { fillColor: [245, 248, 252] },
+    columnStyles: {
+      0: { cellWidth: 17 }, 1: { cellWidth: 14 }, 2: { cellWidth: 32 },
+      3: { cellWidth: 12, halign: 'right' }, 4: { cellWidth: 12, halign: 'right' }, 5: { cellWidth: 12, halign: 'right' },
+      6: { cellWidth: 12, halign: 'right' }, 7: { cellWidth: 16, halign: 'right' }, 8: { cellWidth: 13, halign: 'right' },
+      9: { cellWidth: 13, halign: 'right' }, 10: { cellWidth: 62 }, 11: { cellWidth: 'auto' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.row.index === rows.length) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [220, 235, 255];
+      }
+    },
+    margin: { left: 14, right: 14, bottom: 14 },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Resumen de paradas por motivo
+  const resumen = resumenParadasListado(rows);
+  if (resumen.length) {
+    if (y > 160) { doc.addPage(); y = 20; }
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+    doc.setFillColor(255, 245, 220); doc.rect(14, y, 269, 6, 'F');
+    doc.text('RESUMEN DE PARADAS POR MOTIVO', 16, y + 4.5);
+    y += 8;
+    doc.autoTable({
+      startY: y,
+      head: [['Motivo', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
+      body: [
+        ...resumen.map(p => [p.motivo, p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / t.minP * 100).toFixed(1)}%`]),
+        ['TOTAL', t.cantP, t.minP.toLocaleString('es-AR'), fmt(t.minP / 60, 2), '100%'],
+      ],
+      theme: 'grid',
+      tableWidth: 160,
+      headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 8.5 },
+      bodyStyles: { fontSize: 8.5 },
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.row.index === resumen.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
+      },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  pdfFooter(doc);
+  doc.save(nombreArchivoListado(f, 'pdf'));
+  toast('PDF descargado correctamente');
+}
 
 function limpiarFiltrosListado() {
   document.getElementById('lst-desde').value = '';
@@ -655,28 +1678,52 @@ function limpiarFiltrosListado() {
 // ─────────────────────────────────────────────
 // ELIMINAR
 // ─────────────────────────────────────────────
-function confirmarEliminar(id) {
-  idAEliminar = id;
+let _accionConfirmada = null;
+
+function pedirConfirmacion(mensajeHTML, accion) {
+  document.getElementById('modal-eliminar-msg').innerHTML = mensajeHTML;
+  _accionConfirmada = accion;
   modalEliminar.show();
 }
 
+function confirmarEliminar(id) {
+  pedirConfirmacion('¿Confirmás que querés eliminar este registro? Esta acción no se puede deshacer.', async () => {
+    try {
+      await apiDelete(`${API}/produccion/${id}`);
+      toast('Registro eliminado', 'danger');
+      cargarListado();
+    } catch (err) {
+      toast(err.message, 'danger');
+    }
+  });
+}
+
 document.getElementById('btn-confirmar-eliminar').addEventListener('click', async () => {
-  if (!idAEliminar) return;
-  try {
-    await apiDelete(`${API}/produccion/${idAEliminar}`);
-    toast('Registro eliminado', 'danger');
-    modalEliminar.hide();
-    cargarListado();
-  } catch (err) {
-    toast(err.message, 'danger');
-  } finally {
-    idAEliminar = null;
-  }
+  const accion = _accionConfirmada;
+  _accionConfirmada = null;
+  modalEliminar.hide();
+  if (accion) await accion();
 });
 
 // ─────────────────────────────────────────────
 // REPORTE KPI MENSUAL
 // ─────────────────────────────────────────────
+// Mismo orden que COLORES_MOTIVO (badges) para que cada motivo tenga siempre el mismo color
+const PALETA_PARADAS = ['rgba(255,193,7,0.85)', 'rgba(13,202,240,0.85)', 'rgba(220,53,69,0.85)', 'rgba(108,117,125,0.85)',
+                        'rgba(25,135,84,0.85)', 'rgba(13,110,253,0.85)', 'rgba(33,37,41,0.85)'];
+const colorMotivoChart = id => PALETA_PARADAS[((parseInt(id) || 1) - 1) % PALETA_PARADAS.length];
+
+// Agrupa las paradas de todos los meses por motivo → [{motivo, cantidad, minutos}] (mayor tiempo primero)
+function resumenParadasPeriodo(datos) {
+  const map = {};
+  datos.forEach(d => (d.paradas || []).forEach(p => {
+    map[p.motivo] = map[p.motivo] || { motivo_id: p.motivo_id, motivo: p.motivo, cantidad: 0, minutos: 0 };
+    map[p.motivo].cantidad += p.cantidad;
+    map[p.motivo].minutos  += p.minutos;
+  }));
+  return Object.values(map).sort((x, y) => y.minutos - x.minutos);
+}
+
 function inicializarFiltrosMensual() {
   if (!document.getElementById('rm-desde').value) {
     document.getElementById('rm-desde').value = primerDiaSeisMesesAtras();
@@ -773,7 +1820,7 @@ async function cargarReporteMensual() {
         </div>
         <div class="col-12 col-lg-4">
           <div class="card shadow-sm h-100">
-            <div class="card-header bg-white"><strong><i class="bi bi-pie-chart me-2 text-warning"></i>Motivos de Parada</strong></div>
+            <div class="card-header bg-white"><strong><i class="bi bi-pie-chart me-2 text-warning"></i>Tiempo de Parada por Motivo</strong></div>
             <div class="card-body d-flex align-items-center justify-content-center"><canvas id="chart-paradas" style="max-height:260px"></canvas></div>
           </div>
         </div>
@@ -808,10 +1855,8 @@ async function cargarReporteMensual() {
                   <th class="text-end">Bid 5L</th>
                   <th class="text-end">Bid 10L</th>
                   <th class="text-end">Total Bid.</th>
-                  <th class="text-end">P. Mant.</th>
-                  <th class="text-end">P. Insumos</th>
-                  <th class="text-end">P. Corte</th>
-                  <th class="text-end">P. Otros</th>
+                  <th class="text-end">Paradas</th>
+                  <th class="text-end">Min. Parada</th>
                 </tr>
               </thead>
               <tbody>
@@ -831,10 +1876,8 @@ async function cargarReporteMensual() {
                     <td class="text-end">${d.bidones_5L.toLocaleString('es-AR')}</td>
                     <td class="text-end">${d.bidones_10L.toLocaleString('es-AR')}</td>
                     <td class="text-end fw-semibold">${d.total_bidones.toLocaleString('es-AR')}</td>
-                    <td class="text-end">${d.paradas_mantenimiento}</td>
-                    <td class="text-end">${d.paradas_insumos}</td>
-                    <td class="text-end">${d.paradas_corte}</td>
-                    <td class="text-end">${d.paradas_otros}</td>
+                    <td class="text-end">${d.cantidad_paradas}</td>
+                    <td class="text-end">${d.minutos_paradas.toLocaleString('es-AR')}</td>
                   </tr>`).join('')}
               </tbody>
               <tfoot class="table-light fw-bold">
@@ -849,10 +1892,8 @@ async function cargarReporteMensual() {
                   <td class="text-end">${totBid5L.toLocaleString('es-AR')}</td>
                   <td class="text-end">${totBid10L.toLocaleString('es-AR')}</td>
                   <td class="text-end">${totBidones.toLocaleString('es-AR')}</td>
-                  <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_mantenimiento,0)}</td>
-                  <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_insumos,0)}</td>
-                  <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_corte,0)}</td>
-                  <td class="text-end">${datos.reduce((a,d)=>a+d.paradas_otros,0)}</td>
+                  <td class="text-end">${datos.reduce((a,d)=>a+d.cantidad_paradas,0)}</td>
+                  <td class="text-end">${datos.reduce((a,d)=>a+d.minutos_paradas,0).toLocaleString('es-AR')}</td>
                 </tr>
               </tfoot>
             </table>
@@ -899,25 +1940,25 @@ async function cargarReporteMensual() {
       }
     });
 
-    // Gráfico paradas
-    const totMant    = datos.reduce((a, d) => a + d.paradas_mantenimiento, 0);
-    const totInsumos = datos.reduce((a, d) => a + d.paradas_insumos, 0);
-    const totCorte   = datos.reduce((a, d) => a + d.paradas_corte, 0);
-    const totOtros   = datos.reduce((a, d) => a + d.paradas_otros, 0);
-    const totalP     = totMant + totInsumos + totCorte + totOtros;
+    // Gráfico paradas (minutos por motivo)
+    const resumenP = resumenParadasPeriodo(datos);
+    const totalMin = resumenP.reduce((s, p) => s + p.minutos, 0);
 
-    if (totalP > 0) {
+    if (totalMin > 0) {
       chartParadas = new Chart(document.getElementById('chart-paradas'), {
         type: 'doughnut',
         data: {
-          labels: ['Mantenimiento', 'Falta de insumos', 'Corte de luz', 'Otros'],
-          datasets: [{ data: [totMant, totInsumos, totCorte, totOtros], backgroundColor: ['rgba(255,193,7,0.85)', 'rgba(23,162,184,0.85)', 'rgba(220,53,69,0.85)', 'rgba(108,117,125,0.85)'], borderWidth: 2 }]
+          labels: resumenP.map(p => p.motivo),
+          datasets: [{ data: resumenP.map(p => p.minutos), backgroundColor: resumenP.map(p => colorMotivoChart(p.motivo_id)), borderWidth: 2 }]
         },
         options: {
           responsive: true,
           plugins: {
             legend: { position: 'bottom' },
-            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${(ctx.raw / totalP * 100).toFixed(1)}%)` } }
+            tooltip: { callbacks: { label: ctx => {
+              const p = resumenP[ctx.dataIndex];
+              return ` ${p.motivo}: ${fmtMin(p.minutos)} · ${p.cantidad} parada${p.cantidad === 1 ? '' : 's'} (${(p.minutos / totalMin * 100).toFixed(1)}%)`;
+            } } }
           }
         }
       });
@@ -951,10 +1992,8 @@ function descargarPDFMensual() {
   const totHP       = datos.reduce((a, d) => a + d.horas_produccion, 0);
   const totHPar     = datos.reduce((a, d) => a + d.horas_parados, 0);
   const avgActivas  = totHT > 0 ? (totHP / totHT * 100).toFixed(1) : 0;
-  const totMant     = datos.reduce((a, d) => a + d.paradas_mantenimiento, 0);
-  const totInsumos  = datos.reduce((a, d) => a + d.paradas_insumos, 0);
-  const totCorte    = datos.reduce((a, d) => a + d.paradas_corte, 0);
-  const totOtrosPDF = datos.reduce((a, d) => a + d.paradas_otros, 0);
+  const totCantP    = datos.reduce((a, d) => a + d.cantidad_paradas, 0);
+  const totMinP     = datos.reduce((a, d) => a + d.minutos_paradas, 0);
 
   // Tarjetas resumen
   doc.autoTable({
@@ -984,7 +2023,7 @@ function descargarPDFMensual() {
 
   doc.autoTable({
     startY: y,
-    head: [['Mes', '% Activas', '% Paradas', 'Bot/h', '5L/h', '10L/h', 'Botellas', 'Bid 5L', 'Bid 10L', 'Total Bid.', 'P.Mant.', 'P.Insum.', 'P.Corte', 'P.Otros']],
+    head: [['Mes', '% Activas', '% Paradas', 'Bot/h', '5L/h', '10L/h', 'Botellas', 'Bid 5L', 'Bid 10L', 'Total Bid.', 'Paradas', 'Min. Parada']],
     body: [
       ...datos.map(d => [
         mesLabel(d.mes),
@@ -997,10 +2036,8 @@ function descargarPDFMensual() {
         d.bidones_5L.toLocaleString('es-AR'),
         d.bidones_10L.toLocaleString('es-AR'),
         d.total_bidones.toLocaleString('es-AR'),
-        d.paradas_mantenimiento,
-        d.paradas_insumos,
-        d.paradas_corte,
-        d.paradas_otros,
+        d.cantidad_paradas,
+        d.minutos_paradas.toLocaleString('es-AR'),
       ]),
       // Fila de totales
       [
@@ -1014,7 +2051,7 @@ function descargarPDFMensual() {
         totBid5L.toLocaleString('es-AR'),
         totBid10L.toLocaleString('es-AR'),
         totBidones.toLocaleString('es-AR'),
-        totMant, totInsumos, totCorte, totOtrosPDF,
+        totCantP, totMinP.toLocaleString('es-AR'),
       ]
     ],
     theme: 'striped',
@@ -1023,7 +2060,7 @@ function descargarPDFMensual() {
     columnStyles: {
       1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'},
       5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}, 8:{halign:'right'},
-      9:{halign:'right'}, 10:{halign:'right'}, 11:{halign:'right'}, 12:{halign:'right'}, 13:{halign:'right'},
+      9:{halign:'right'}, 10:{halign:'right'}, 11:{halign:'right'},
     },
     didParseCell: (data) => {
       if (data.row.index === datos.length) {
@@ -1035,30 +2072,28 @@ function descargarPDFMensual() {
   });
   y = doc.lastAutoTable.finalY + 8;
 
-  // Tabla de distribución de paradas
-  if (totMant + totInsumos + totCorte + totOtrosPDF > 0) {
-    const totalP = totMant + totInsumos + totCorte + totOtrosPDF;
+  // Tabla de distribución de paradas por motivo
+  const resumenP = resumenParadasPeriodo(datos);
+  if (totMinP > 0) {
+    if (y > 170) { doc.addPage(); y = 20; }
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
     doc.setFillColor(255, 245, 220); doc.rect(14, y, 269, 6, 'F');
-    doc.text('DISTRIBUCIÓN DE PARADAS', 16, y + 4.5);
+    doc.text('DISTRIBUCIÓN DE PARADAS POR MOTIVO', 16, y + 4.5);
     y += 8;
 
     doc.autoTable({
       startY: y,
-      head: [['Motivo de Parada', 'Cant. ocurrencias', '% del total']],
+      head: [['Motivo de Parada', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
       body: [
-        ['Mantenimiento',    totMant,      `${(totMant    / totalP * 100).toFixed(1)}%`],
-        ['Falta de insumos', totInsumos,   `${(totInsumos / totalP * 100).toFixed(1)}%`],
-        ['Corte de luz',     totCorte,     `${(totCorte   / totalP * 100).toFixed(1)}%`],
-        ['Otros',            totOtrosPDF,  `${(totOtrosPDF/ totalP * 100).toFixed(1)}%`],
-        ['TOTAL',            totalP,       '100%'],
+        ...resumenP.map(p => [p.motivo, p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / totMinP * 100).toFixed(1)}%`]),
+        ['TOTAL', totCantP, totMinP.toLocaleString('es-AR'), fmt(totMinP / 60, 2), '100%'],
       ],
       theme: 'grid',
       headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
       didParseCell: (data) => {
-        if (data.row.index === 4) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
+        if (data.section === 'body' && data.row.index === resumenP.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
       },
       margin: { left: 14, right: 14 },
     });
@@ -1338,4 +2373,5 @@ function descargarPDFAcumulado() {
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-section="carga"]').classList.add('active');
   limpiarFormulario();
+  cargarMaestros().then(() => renderOperariosForm([]));
 });

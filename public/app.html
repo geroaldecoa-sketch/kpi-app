@@ -41,6 +41,11 @@
             <i class="bi bi-clipboard-data me-1"></i>Reporte Acumulado
           </a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link nav-tab" href="#" data-section="configuracion">
+            <i class="bi bi-gear me-1"></i>Configuración
+          </a>
+        </li>
       </ul>
     </div>
   </div>
@@ -97,29 +102,41 @@
                 </div>
               </div>
 
-              <!-- Fila 2: Detalle Horas + Motivo Parada -->
-              <div class="row g-3 mb-3">
-                <div class="col-md-6">
-                  <label class="form-label fw-semibold">Detalle de Horas</label>
-                  <textarea class="form-control" id="f-detalle-horas" rows="2" placeholder="Describí cómo se distribuyeron las horas…"></textarea>
+              <!-- Operarios del turno -->
+              <div class="card bg-light border-0 p-3 mb-3">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <h6 class="text-secondary mb-0"><i class="bi bi-people me-1"></i>Operarios del turno <span class="badge rounded-pill text-bg-primary ms-1" id="f-operarios-cant">0</span></h6>
+                  <a href="#" class="small" onclick="irAConfiguracion(event)"><i class="bi bi-gear me-1"></i>Administrar operarios</a>
                 </div>
-                <div class="col-md-3">
-                  <label class="form-label fw-semibold">Motivo de Parada</label>
-                  <select class="form-select" id="f-motivo-parada">
-                    <option value="">— Sin parada —</option>
-                    <option>Mantenimiento</option>
-                    <option>Falta de insumos</option>
-                    <option>Corte de luz</option>
-                    <option>Otros</option>
-                  </select>
-                </div>
-                <div class="col-md-3">
-                  <label class="form-label fw-semibold">Detalle Producción</label>
-                  <textarea class="form-control" id="f-detalle-produccion" rows="2" placeholder="Novedades del turno…"></textarea>
+                <div id="f-grupos" class="d-flex flex-wrap align-items-center gap-2 mb-2"></div>
+                <div id="f-operarios" class="d-flex flex-wrap gap-2">
+                  <span class="text-muted small">Cargando operarios…</span>
                 </div>
               </div>
 
-              <!-- Fila 3: Horas (con validación cruzada) -->
+              <!-- Paradas del turno -->
+              <div class="card bg-light border-0 p-3 mb-3">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <h6 class="text-secondary mb-0"><i class="bi bi-pause-circle me-1"></i>Paradas del turno</h6>
+                  <a href="#" class="small" onclick="irAConfiguracion(event)"><i class="bi bi-gear me-1"></i>Administrar motivos</a>
+                </div>
+                <div class="row g-2 d-none d-md-flex paradas-head">
+                  <div class="col-md-4">Motivo <span class="text-danger">*</span></div>
+                  <div class="col-md-5">Detalle</div>
+                  <div class="col-md-2">Minutos <span class="text-danger">*</span></div>
+                </div>
+                <div id="f-paradas-body"></div>
+                <div id="f-paradas-vacio" class="text-muted small mb-2">Sin paradas en este turno.</div>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarParada()">
+                    <i class="bi bi-plus-lg me-1"></i>Agregar parada
+                  </button>
+                  <span class="small text-muted ms-auto" id="f-paradas-total">Total paradas: 0 min</span>
+                </div>
+                <datalist id="dl-detalles-parada"></datalist>
+              </div>
+
+              <!-- Distribución de horas (parados y producción se calculan) -->
               <div class="card bg-light border-0 p-3 mb-3">
                 <h6 class="text-secondary mb-3"><i class="bi bi-clock me-1"></i>Distribución de Horas</h6>
                 <div class="row g-3">
@@ -128,12 +145,14 @@
                     <input type="number" class="form-control" id="f-horas-totales" min="0" step="0.5" required />
                   </div>
                   <div class="col-md-4">
-                    <label class="form-label fw-semibold">Horas Producción <span class="text-danger">*</span></label>
-                    <input type="number" class="form-control" id="f-horas-produccion" min="0" step="0.5" required oninput="actualizarSumaHoras()" />
+                    <label class="form-label fw-semibold">Horas Parados</label>
+                    <input type="text" class="form-control campo-calculado" id="f-horas-parados" readonly tabindex="-1" value="0" />
+                    <div class="form-text">Suma de los minutos de las paradas.</div>
                   </div>
                   <div class="col-md-4">
-                    <label class="form-label fw-semibold">Horas Parados <span class="text-danger">*</span></label>
-                    <input type="number" class="form-control" id="f-horas-parados" min="0" step="0.5" required oninput="actualizarSumaHoras()" />
+                    <label class="form-label fw-semibold">Horas Producción</label>
+                    <input type="text" class="form-control campo-calculado" id="f-horas-produccion" readonly tabindex="-1" />
+                    <div class="form-text">Horas Totales − Horas Parados.</div>
                   </div>
                 </div>
                 <!-- Indicador de validación -->
@@ -173,6 +192,12 @@
                 </div>
               </div>
 
+              <!-- Observaciones -->
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Observaciones</label>
+                <textarea class="form-control" id="f-observaciones" rows="3" placeholder="Novedades del turno…"></textarea>
+              </div>
+
               <!-- Botones -->
               <div class="d-flex gap-2">
                 <button type="submit" id="btn-submit" class="btn btn-primary px-4">
@@ -210,6 +235,13 @@
           <button class="btn btn-sm btn-outline-secondary" onclick="limpiarFiltrosListado()">
             <i class="bi bi-x-circle me-1"></i>Limpiar
           </button>
+          <div class="vr mx-1 d-none d-md-block"></div>
+          <button class="btn btn-sm btn-success btn-export-listado" onclick="descargarExcelListado()" title="Descargar el detalle de los turnos listados en Excel" disabled>
+            <i class="bi bi-file-earmark-excel me-1"></i>Excel
+          </button>
+          <button class="btn btn-sm btn-danger btn-export-listado" onclick="descargarPDFListado()" title="Descargar el detalle de los turnos listados en PDF" disabled>
+            <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+          </button>
         </div>
       </div>
       <div class="card-body p-0">
@@ -232,7 +264,7 @@
                 <th class="text-end">Bot/h</th>
                 <th class="text-end">5L/h</th>
                 <th class="text-end">10L/h</th>
-                <th>Motivo Parada</th>
+                <th>Paradas</th>
                 <th class="text-center">Acciones</th>
               </tr>
             </thead>
@@ -319,6 +351,148 @@
     </div>
   </section>
 
+  <!-- ═══════════════════════════════════════ -->
+  <!-- SECCIÓN: CONFIGURACIÓN (ABM maestros) -->
+  <!-- ═══════════════════════════════════════ -->
+  <section id="section-configuracion" class="app-section d-none">
+    <div class="row g-4">
+
+      <!-- ABM OPERARIOS -->
+      <div class="col-12 col-xl-7">
+        <div class="card shadow-sm h-100">
+          <div class="card-header bg-white py-3 d-flex flex-wrap align-items-center gap-2">
+            <h5 class="mb-0 me-auto"><i class="bi bi-people me-2 text-primary"></i>Operarios</h5>
+            <button type="button" class="btn btn-sm btn-success" onclick="document.getElementById('op-import-file').click()">
+              <i class="bi bi-file-earmark-arrow-up me-1"></i>Importar Excel
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-success" onclick="descargarModeloOperarios()" title="Planilla modelo con las columnas Nombre, Apellido y DNI">
+              <i class="bi bi-file-earmark-arrow-down me-1"></i>Modelo
+            </button>
+            <input type="file" id="op-import-file" accept=".xlsx" class="d-none" />
+          </div>
+          <div class="card-body">
+            <form id="form-operario" class="row g-2 align-items-end mb-3" novalidate>
+              <input type="hidden" id="op-id" />
+              <div class="col-sm-4">
+                <label class="form-label fw-semibold small mb-1">Nombre <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="op-nombre" maxlength="80" required />
+              </div>
+              <div class="col-sm-3">
+                <label class="form-label fw-semibold small mb-1">Apellido <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="op-apellido" maxlength="80" required />
+              </div>
+              <div class="col-sm-2">
+                <label class="form-label fw-semibold small mb-1">DNI</label>
+                <input type="text" class="form-control form-control-sm" id="op-dni" maxlength="12" inputmode="numeric" />
+              </div>
+              <div class="col-sm-3 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-primary flex-fill" id="op-btn">
+                  <i class="bi bi-plus-lg me-1"></i><span>Agregar</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="op-cancelar" title="Cancelar edición">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
+            </form>
+            <div class="input-group input-group-sm mb-2">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input type="search" class="form-control" id="op-buscar" placeholder="Buscar por nombre, apellido o DNI…" />
+            </div>
+            <div class="table-responsive tabla-scroll">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr><th>Apellido y nombre</th><th>DNI</th><th>Grupos</th><th class="text-center">Turnos</th><th class="text-center">Activo</th><th class="text-center">Acciones</th></tr>
+                </thead>
+                <tbody id="tbody-operarios"></tbody>
+              </table>
+            </div>
+            <div class="small text-muted mt-2" id="op-contador"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ABM MOTIVOS DE PARADA -->
+      <div class="col-12 col-xl-5">
+        <div class="card shadow-sm h-100">
+          <div class="card-header bg-white py-3">
+            <h5 class="mb-0"><i class="bi bi-pause-circle me-2 text-warning"></i>Motivos de parada</h5>
+          </div>
+          <div class="card-body">
+            <form id="form-motivo" class="row g-2 align-items-end mb-3" novalidate>
+              <input type="hidden" id="mo-id" />
+              <div class="col-sm-9">
+                <label class="form-label fw-semibold small mb-1">Motivo <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="mo-nombre" maxlength="100" required />
+              </div>
+              <div class="col-sm-3 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-primary flex-fill" id="mo-btn">
+                  <i class="bi bi-plus-lg me-1"></i><span>Agregar</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="mo-cancelar" title="Cancelar edición">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
+            </form>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr><th>Motivo</th><th class="text-center">Paradas</th><th class="text-center">Activo</th><th class="text-center">Acciones</th></tr>
+                </thead>
+                <tbody id="tbody-motivos"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- GRUPOS DE OPERARIOS -->
+      <div class="col-12">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white py-3">
+            <h5 class="mb-0"><i class="bi bi-diagram-3 me-2 text-success"></i>Grupos de operarios</h5>
+            <div class="small text-muted mt-1">Armá equipos (por ejemplo, la cuadrilla de cada turno) para tildarlos todos juntos en la carga con un solo clic.</div>
+          </div>
+          <div class="card-body">
+            <form id="form-grupo" class="mb-3" novalidate>
+              <input type="hidden" id="gr-id" />
+              <div class="row g-2 align-items-end mb-2">
+                <div class="col-sm-6 col-lg-4">
+                  <label class="form-label fw-semibold small mb-1">Nombre del grupo <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control form-control-sm" id="gr-nombre" maxlength="60" placeholder="Ej: Equipo Mañana" required />
+                </div>
+                <div class="col-sm-6 col-lg-8 d-flex gap-1 justify-content-sm-end">
+                  <button type="button" class="btn btn-sm btn-link text-decoration-none" onclick="marcarTodosGrupo(true)">Marcar todos</button>
+                  <button type="button" class="btn btn-sm btn-link text-decoration-none" onclick="marcarTodosGrupo(false)">Ninguno</button>
+                  <button type="submit" class="btn btn-sm btn-primary px-3" id="gr-btn">
+                    <i class="bi bi-plus-lg me-1"></i><span>Crear grupo</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="gr-cancelar" title="Cancelar edición">
+                    <i class="bi bi-x-lg"></i>
+                  </button>
+                </div>
+              </div>
+              <label class="form-label fw-semibold small mb-1">Integrantes <span class="text-muted fw-normal" id="gr-contador"></span></label>
+              <div id="gr-miembros" class="d-flex flex-wrap gap-2 p-2 bg-light rounded"></div>
+            </form>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr><th style="width:20%">Grupo</th><th>Integrantes</th><th class="text-center" style="width:80px">Activo</th><th class="text-center" style="width:100px">Acciones</th></tr>
+                </thead>
+                <tbody id="tbody-grupos"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <p class="text-muted small mt-3 mb-0">
+      <i class="bi bi-info-circle me-1"></i>Los operarios y motivos que ya se usaron en algún turno no se pueden eliminar: desactivalos para que dejen de aparecer en la carga sin perder el historial.
+    </p>
+  </section>
+
 </div><!-- /container -->
 
 <!-- MODAL DETALLE DE TURNO -->
@@ -342,15 +516,34 @@
   </div>
 </div>
 
+<!-- MODAL IMPORTAR OPERARIOS -->
+<div class="modal fade" id="modal-importar" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h6 class="modal-title"><i class="bi bi-file-earmark-arrow-up me-2"></i>Importar operarios</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="importar-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-sm btn-success" id="btn-confirmar-importar">
+          <i class="bi bi-check-lg me-1"></i><span>Importar</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL CONFIRMACIÓN ELIMINACIÓN -->
 <div class="modal fade" id="modal-eliminar" tabindex="-1">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header bg-danger text-white">
-        <h6 class="modal-title"><i class="bi bi-trash me-2"></i>Eliminar registro</h6>
+        <h6 class="modal-title"><i class="bi bi-trash me-2"></i>Confirmar eliminación</h6>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" id="modal-eliminar-msg">
         ¿Confirmás que querés eliminar este registro? Esta acción no se puede deshacer.
       </div>
       <div class="modal-footer">
@@ -375,6 +568,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
