@@ -16,7 +16,7 @@ const CARPETA_BACKUPS = path.join(__dirname, 'backups');
 // Solo se restauran las tablas de ESTA aplicación. La base de Render es compartida con otros
 // sistemas (banco de horas, lotetrack…) y sus tablas NO se tocan.
 const TABLAS_KPI = [
-  'produccion', 'operarios', 'motivos_parada', 'produccion_operarios',
+  'produccion', 'operarios', 'motivos_parada', 'submotivos_parada', 'produccion_operarios',
   'paradas', 'grupos_operarios', 'grupo_operario_miembros',
 ];
 

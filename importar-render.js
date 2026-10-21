@@ -12,7 +12,7 @@ const { preguntar, ocultarClave } = require('./herramientas-db');
 
 // Tablas en orden de dependencia (las que no existan en Render se saltean)
 const TABLAS = [
-  'produccion', 'operarios', 'motivos_parada',
+  'produccion', 'operarios', 'motivos_parada', 'submotivos_parada',
   'produccion_operarios', 'paradas', 'grupos_operarios', 'grupo_operario_miembros',
 ];
 

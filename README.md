@@ -71,8 +71,9 @@ Las tablas se crean solas al arrancar (`initSchema` en `database.js`). Los regis
 | `operarios` | ABM de operarios (nombre, apellido, DNI, activo). Se pueden importar desde Excel |
 | `grupos_operarios` / `grupo_operario_miembros` | Grupos de operarios para tildarlos juntos en la carga |
 | `motivos_parada` | ABM de motivos de parada (nombre, activo) |
+| `submotivos_parada` | ABM de submotivos: cada motivo tiene su propia lista (ej: Mantenimiento → Sopladora) |
 | `produccion_operarios` | Operarios que trabajaron en cada turno (N a N) |
-| `paradas` | Paradas de cada turno: motivo, detalle, minutos |
+| `paradas` | Paradas de cada turno: motivo, submotivo, detalle, minutos |
 
 **Horas calculadas:** `horas_parados = suma de minutos de las paradas / 60` y `horas_produccion = horas_totales − horas_parados`.
 
@@ -104,6 +105,8 @@ Los operarios y motivos que ya se usaron no se pueden eliminar (se desactivan pa
 | PUT/DELETE | `/api/grupos/:id` | Editar / eliminar grupo |
 | GET/POST | `/api/motivos` | Listar / crear motivo de parada |
 | PUT/DELETE | `/api/motivos/:id` | Editar / eliminar motivo |
+| GET/POST | `/api/submotivos` | Listar / crear submotivo (`{motivo_id, nombre}`) |
+| PUT/DELETE | `/api/submotivos/:id` | Editar / eliminar submotivo |
 | GET | `/api/paradas/detalles` | Detalles ya usados (autocompletar) |
 | GET | `/api/reportes/mensual` | Reporte KPI mensual agrupado (incluye paradas por motivo) |
 | GET | `/api/reportes/acumulado` | Reporte acumulado por fecha/turno |

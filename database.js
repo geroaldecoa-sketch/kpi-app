@@ -128,6 +128,21 @@ async function initSchema() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_paradas_produccion ON paradas(produccion_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_paradas_motivo ON paradas(motivo_id)`);
 
+    // ── Submotivos de parada (cada motivo tiene su propia lista)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS submotivos_parada (
+        id          SERIAL PRIMARY KEY,
+        motivo_id   INTEGER NOT NULL REFERENCES motivos_parada(id) ON DELETE CASCADE,
+        nombre      TEXT    NOT NULL,
+        activo      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_submotivos_nombre ON submotivos_parada (motivo_id, LOWER(nombre))`);
+    await client.query(`ALTER TABLE paradas ADD COLUMN IF NOT EXISTS submotivo_id INTEGER REFERENCES submotivos_parada(id) ON DELETE RESTRICT`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_paradas_submotivo ON paradas(submotivo_id)`);
+
     // ── Motivos iniciales (solo si la tabla está vacía)
     const { rows: [{ n }] } = await client.query('SELECT COUNT(*)::int AS n FROM motivos_parada');
     if (n === 0) {

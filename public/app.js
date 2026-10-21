@@ -278,16 +278,17 @@ function verDetalle(id, r) {
         <h6 class="text-secondary mb-2"><i class="bi bi-pause-circle me-1"></i>Paradas del turno</h6>
         ${(r.paradas || []).length ? `
           <table class="table table-sm mb-0">
-            <thead><tr><th>Motivo</th><th>Detalle</th><th class="text-end">Tiempo</th></tr></thead>
+            <thead><tr><th>Motivo</th><th>Submotivo</th><th>Detalle</th><th class="text-end">Tiempo</th></tr></thead>
             <tbody>
               ${r.paradas.map(p => `
                 <tr>
                   <td>${badgeMotivo(p.motivo_id, p.motivo)}</td>
+                  <td>${p.submotivo ? esc(p.submotivo) : '<span class="text-muted">—</span>'}</td>
                   <td>${p.detalle ? esc(p.detalle) : '<span class="text-muted">—</span>'}</td>
                   <td class="text-end">${fmtMin(p.minutos)}</td>
                 </tr>`).join('')}
             </tbody>
-            <tfoot><tr class="fw-bold"><td colspan="2">Total (${r.paradas.length} parada${r.paradas.length === 1 ? '' : 's'})</td><td class="text-end">${fmtMin(r.minutos_parada)}</td></tr></tfoot>
+            <tfoot><tr class="fw-bold"><td colspan="3">Total (${r.paradas.length} parada${r.paradas.length === 1 ? '' : 's'})</td><td class="text-end">${fmtMin(r.minutos_parada)}</td></tr></tfoot>
           </table>` : '<em class="text-muted small">Sin paradas</em>'}
       </div>
     </div>
@@ -409,15 +410,15 @@ function descargarPDFRegistro(r) {
   if ((r.paradas || []).length) {
     doc.autoTable({
       startY: y,
-      head: [['Motivo', 'Detalle', 'Minutos']],
+      head: [['Motivo', 'Submotivo', 'Detalle', 'Minutos']],
       body: [
-        ...r.paradas.map(p => [p.motivo, p.detalle || '—', p.minutos]),
-        [`TOTAL (${r.paradas.length})`, '', `${r.minutos_parada} min (${fmt(r.minutos_parada / 60, 2)} hs)`],
+        ...r.paradas.map(p => [p.motivo, p.submotivo || '—', p.detalle || '—', p.minutos]),
+        [`TOTAL (${r.paradas.length})`, '', '', `${r.minutos_parada} min (${fmt(r.minutos_parada / 60, 2)} hs)`],
       ],
       theme: 'striped',
       headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 0: { cellWidth: 50 }, 2: { halign: 'right', cellWidth: 45 } },
+      columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 40 }, 3: { halign: 'right', cellWidth: 40 } },
       didParseCell: (data) => {
         if (data.section === 'body' && data.row.index === r.paradas.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
       },
@@ -445,6 +446,7 @@ function descargarPDFRegistro(r) {
 // MAESTROS (operarios / motivos) – caché en memoria
 // ─────────────────────────────────────────────
 let operarios = [];        // todos (activos e inactivos)
+let submotivos = [];       // [{id, motivo_id, motivo, nombre, activo, usos}]
 let grupos    = [];        // grupos de operarios [{id, nombre, activo, operario_ids}]
 let motivos   = [];
 let detallesParada = [];   // [{motivo_id, detalle, usos}] para autocompletar
@@ -462,11 +464,12 @@ function fmtMin(min) {
 
 async function cargarMaestros() {
   try {
-    [operarios, motivos, detallesParada, grupos] = await Promise.all([
+    [operarios, motivos, detallesParada, grupos, submotivos] = await Promise.all([
       apiGet(`${API}/operarios`),
       apiGet(`${API}/motivos`),
       apiGet(`${API}/paradas/detalles`),
       apiGet(`${API}/grupos`),
+      apiGet(`${API}/submotivos`),
     ]);
   } catch (err) {
     toast('No se pudieron cargar operarios / motivos: ' + err.message, 'danger');
@@ -567,9 +570,10 @@ function agregarParada(p = {}) {
   const tr = document.createElement('div');
   tr.className = 'row g-2 align-items-center fila-parada';
   tr.innerHTML = `
-    <div class="col-12 col-md-4"><select class="form-select form-select-sm par-motivo" aria-label="Motivo">${opcionesMotivo(p.motivo_id)}</select></div>
-    <div class="col-12 col-md-5"><input type="text" class="form-control form-control-sm par-detalle" list="dl-detalles-parada"
-               maxlength="200" placeholder="Detalle (ej: Sopladora)" aria-label="Detalle" value="${esc(p.detalle || '')}"></div>
+    <div class="col-12 col-md-3"><select class="form-select form-select-sm par-motivo" aria-label="Motivo">${opcionesMotivo(p.motivo_id)}</select></div>
+    <div class="col-12 col-md-3"><select class="form-select form-select-sm par-submotivo" aria-label="Submotivo"></select></div>
+    <div class="col-12 col-md-3"><input type="text" class="form-control form-control-sm par-detalle" list="dl-detalles-parada"
+               maxlength="200" placeholder="Detalle (opcional)" aria-label="Detalle" value="${esc(p.detalle || '')}"></div>
     <div class="col-9 col-md-2">
       <div class="input-group input-group-sm">
         <input type="number" class="form-control par-minutos" min="1" step="1" placeholder="0" aria-label="Minutos" value="${p.minutos ?? ''}">
@@ -580,7 +584,9 @@ function agregarParada(p = {}) {
       <button type="button" class="btn btn-sm btn-outline-danger" title="Quitar parada"><i class="bi bi-trash"></i></button>
     </div>`;
   tr.querySelector('.par-minutos').addEventListener('input', recalcularHoras);
-  tr.querySelector('.par-motivo').addEventListener('change', actualizarDatalistDetalles);
+  llenarSubmotivos(tr, p.submotivo_id);
+  tr.querySelector('.par-motivo').addEventListener('change', e => { llenarSubmotivos(tr); actualizarDatalistDetalles(e); });
+  tr.querySelector('.par-submotivo').addEventListener('change', e => { e.target.classList.remove('is-invalid'); actualizarDatalistDetalles(e); });
   tr.querySelector('.par-detalle').addEventListener('focus', e => actualizarDatalistDetalles(e));
   tr.querySelector('button').addEventListener('click', () => { tr.remove(); recalcularHoras(); });
   tbody.appendChild(tr);
@@ -588,13 +594,34 @@ function agregarParada(p = {}) {
   recalcularHoras();
 }
 
-// Sugiere detalles usados antes con el mismo motivo (o todos si no hay motivo elegido)
+// Opciones de submotivo según el motivo elegido en la fila
+function llenarSubmotivos(tr, seleccionado = null) {
+  const sel = tr.querySelector('.par-submotivo');
+  const motivoId = parseInt(tr.querySelector('.par-motivo').value) || null;
+  const actual = parseInt(seleccionado ?? sel.value) || null;
+  const lista = submotivos.filter(s => s.motivo_id === motivoId && (s.activo || s.id === actual));
+  if (!motivoId) {
+    sel.innerHTML = '<option value="">— Elegí el motivo —</option>';
+    sel.disabled = true;
+  } else if (lista.length === 0) {
+    sel.innerHTML = '<option value="">— Sin submotivos —</option>';
+    sel.disabled = true;
+  } else {
+    sel.innerHTML = '<option value="">— Seleccioná —</option>' + lista.map(s =>
+      `<option value="${s.id}" ${s.id === actual ? 'selected' : ''}>${esc(s.nombre)}${s.activo ? '' : ' (inactivo)'}</option>`).join('');
+    sel.disabled = false;
+  }
+}
+
+// Sugiere detalles usados antes con el mismo motivo/submotivo (o todos si no hay motivo elegido)
 function actualizarDatalistDetalles(e) {
   const tr = e.target.closest('.fila-parada');
   const motivoId = parseInt(tr.querySelector('.par-motivo').value) || null;
+  const subId    = parseInt(tr.querySelector('.par-submotivo').value) || null;
   const vistos = new Set();
   const opciones = detallesParada
     .filter(d => !motivoId || d.motivo_id === motivoId)
+    .filter(d => !subId || d.submotivo_id === subId)
     .filter(d => !vistos.has(d.detalle.toLowerCase()) && vistos.add(d.detalle.toLowerCase()));
   document.getElementById('dl-detalles-parada').innerHTML =
     opciones.map(d => `<option value="${esc(d.detalle)}">`).join('');
@@ -602,8 +629,9 @@ function actualizarDatalistDetalles(e) {
 
 function paradasDelFormulario() {
   return [...document.querySelectorAll('#f-paradas-body .fila-parada')].map(tr => ({
-    motivo_id: parseInt(tr.querySelector('.par-motivo').value) || null,
-    detalle:   tr.querySelector('.par-detalle').value.trim(),
+    motivo_id:    parseInt(tr.querySelector('.par-motivo').value) || null,
+    submotivo_id: parseInt(tr.querySelector('.par-submotivo').value) || null,
+    detalle:      tr.querySelector('.par-detalle').value.trim(),
     minutos:   parseInt(tr.querySelector('.par-minutos').value) || 0,
   }));
 }
@@ -687,6 +715,19 @@ document.getElementById('form-produccion').addEventListener('submit', async e =>
     operario_ids:        operariosSeleccionados(),
     paradas:             paradasDelFormulario(),
   };
+
+  // Submotivo obligatorio cuando el motivo tiene lista
+  const filasSinSub = [...document.querySelectorAll('#f-paradas-body .fila-parada')]
+    .map((tr, i) => ({ tr, i, sel: tr.querySelector('.par-submotivo') }))
+    .filter(x => !x.sel.disabled && !x.sel.value);
+  if (filasSinSub.length) {
+    filasSinSub.forEach(x => x.sel.classList.add('is-invalid'));
+    alertEl.className = 'alert alert-danger';
+    alertEl.innerHTML = '<strong>Errores:</strong><ul class="mb-0 mt-1">' +
+      filasSinSub.map(x => `<li>Parada ${x.i + 1}: elegí el submotivo</li>`).join('') + '</ul>';
+    filasSinSub[0].sel.focus();
+    return;
+  }
 
   _enviandoFormulario = true;
   btnSubmit.disabled = true;
@@ -794,10 +835,14 @@ const ABM = {
   motivos: {
     url: `${API}/motivos`, prefijo: 'mo', tbody: 'tbody-motivos', etiqueta: 'Motivo',
     campos: ['nombre'],
-    columnas: 4,
-    fila: m => `
+    columnas: 5,
+    fila: m => {
+      const n = submotivos.filter(s => s.motivo_id === m.id).length;
+      return `
       <td class="fw-semibold">${esc(m.nombre)}</td>
-      <td class="text-center">${m.usos}</td>`,
+      <td class="text-center"><a href="#" class="text-decoration-none" onclick="filtrarSubmotivos(event, ${m.id})" title="Ver / agregar submotivos">${n ? `<span class="badge text-bg-warning">${n}</span>` : '<span class="small">+ agregar</span>'}</a></td>
+      <td class="text-center">${m.usos}</td>`;
+    },
     lista: () => motivos,
   },
 };
@@ -806,8 +851,123 @@ async function cargarConfiguracion() {
   await cargarMaestros();
   renderABM('operarios');
   renderABM('motivos');
+  renderSubmotivosABM();
   renderGruposABM();
 }
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN – SUBMOTIVOS DE PARADA
+// El select de motivo sirve para filtrar la tabla y para elegir a qué motivo se agrega.
+// ─────────────────────────────────────────────
+function renderSubmotivosABM() {
+  const selMotivo = document.getElementById('sm-motivo');
+  const actual = parseInt(selMotivo.value) || null;
+  selMotivo.innerHTML = '<option value="">— Todos los motivos —</option>' +
+    motivos.map(m => `<option value="${m.id}" ${m.id === actual ? 'selected' : ''}>${esc(m.nombre)}${m.activo ? '' : ' (inactivo)'}</option>`).join('');
+
+  const lista = submotivos.filter(s => !actual || s.motivo_id === actual);
+  document.getElementById('tbody-submotivos').innerHTML = lista.length === 0
+    ? `<tr><td colspan="5" class="text-center text-muted py-3">${actual ? 'Este motivo todavía no tiene submotivos.' : 'Todavía no hay submotivos. Elegí un motivo y agregá el primero.'}</td></tr>`
+    : lista.map(s => `
+      <tr class="${s.activo ? '' : 'text-muted'}">
+        <td class="small">${esc(s.motivo)}</td>
+        <td class="fw-semibold">${esc(s.nombre)}</td>
+        <td class="text-center">${s.usos}</td>
+        <td class="text-center">
+          <div class="form-check form-switch d-inline-block mb-0">
+            <input class="form-check-input" type="checkbox" ${s.activo ? 'checked' : ''} onchange="toggleActivoSubmotivo(${s.id}, this.checked)">
+          </div>
+        </td>
+        <td class="text-center" style="white-space:nowrap">
+          <button class="btn btn-xs btn-outline-primary me-1" title="Editar" onclick="editarSubmotivo(${s.id})"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-xs btn-outline-secondary" title="${s.usos > 0 ? 'En uso: desactivalo en lugar de eliminarlo' : 'Eliminar'}"
+            ${s.usos > 0 ? 'disabled' : ''} onclick="eliminarSubmotivo(${s.id})"><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>`).join('');
+}
+
+function filtrarSubmotivos(e, motivoId) {
+  if (e) e.preventDefault();
+  document.getElementById('sm-motivo').value = motivoId;
+  renderSubmotivosABM();
+  document.getElementById('card-submotivos').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.getElementById('sm-nombre').focus();
+}
+
+function resetFormSubmotivo() {
+  document.getElementById('sm-id').value = '';
+  document.getElementById('sm-nombre').value = '';
+  document.querySelector('#sm-btn span').textContent = 'Agregar';
+  document.querySelector('#sm-btn i').className = 'bi bi-plus-lg me-1';
+  document.getElementById('sm-cancelar').classList.add('d-none');
+}
+
+function editarSubmotivo(id) {
+  const s = submotivos.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('sm-id').value = id;
+  document.getElementById('sm-motivo').value = s.motivo_id;
+  document.getElementById('sm-nombre').value = s.nombre;
+  document.querySelector('#sm-btn span').textContent = 'Guardar';
+  document.querySelector('#sm-btn i').className = 'bi bi-check-lg me-1';
+  document.getElementById('sm-cancelar').classList.remove('d-none');
+  renderSubmotivosABM();
+  document.getElementById('sm-nombre').focus();
+}
+
+async function guardarSubmotivo() {
+  const id = document.getElementById('sm-id').value;
+  const motivo_id = parseInt(document.getElementById('sm-motivo').value) || null;
+  const nombre = document.getElementById('sm-nombre').value.trim();
+  if (!motivo_id) { toast('Elegí a qué motivo pertenece', 'warning'); document.getElementById('sm-motivo').focus(); return; }
+  if (!nombre)    { toast('Escribí el nombre del submotivo', 'warning'); document.getElementById('sm-nombre').focus(); return; }
+  const actual = id ? submotivos.find(s => s.id === parseInt(id)) : null;
+  try {
+    const data = { motivo_id, nombre, activo: actual ? actual.activo : true };
+    if (id) await apiPut(`${API}/submotivos/${id}`, data);
+    else    await apiPost(`${API}/submotivos`, data);
+    toast(`Submotivo ${id ? 'actualizado' : 'agregado'}`);
+    resetFormSubmotivo();
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+    document.getElementById('sm-nombre').focus();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  }
+}
+
+async function toggleActivoSubmotivo(id, activo) {
+  const s = submotivos.find(x => x.id === id);
+  if (!s) return;
+  try {
+    await apiPut(`${API}/submotivos/${id}`, { motivo_id: s.motivo_id, nombre: s.nombre, activo });
+    toast(`Submotivo ${activo ? 'activado' : 'desactivado'}`, activo ? 'success' : 'secondary');
+    await cargarConfiguracion();
+    refrescarFormularioCarga();
+  } catch (err) {
+    toast((err.errores || [err.error || err.message]).join(' · '), 'danger');
+  }
+}
+
+function eliminarSubmotivo(id) {
+  const s = submotivos.find(x => x.id === id);
+  if (!s) return;
+  pedirConfirmacion(`¿Eliminar el submotivo <strong>${esc(s.nombre)}</strong> de ${esc(s.motivo)}?`, async () => {
+    try {
+      await apiDelete(`${API}/submotivos/${id}`);
+      toast('Submotivo eliminado', 'danger');
+      if (document.getElementById('sm-id').value === String(id)) resetFormSubmotivo();
+      await cargarConfiguracion();
+      refrescarFormularioCarga();
+    } catch (err) {
+      toast(err.message, 'danger');
+    }
+  });
+}
+
+document.getElementById('form-submotivo').addEventListener('submit', e => { e.preventDefault(); guardarSubmotivo(); });
+document.getElementById('sm-cancelar').addEventListener('click', () => { resetFormSubmotivo(); renderSubmotivosABM(); });
+document.getElementById('sm-motivo').addEventListener('change', renderSubmotivosABM);
 
 function renderABM(tipo) {
   const cfg   = ABM[tipo];
@@ -917,9 +1077,10 @@ function eliminarABM(tipo, id) {
 // Mantiene lo cargado en el formulario de producción pero con los maestros actualizados
 function refrescarFormularioCarga() {
   renderOperariosForm(operariosSeleccionados());
-  document.querySelectorAll('#f-paradas-body .par-motivo').forEach(sel => {
-    const v = sel.value;
-    sel.innerHTML = opcionesMotivo(v);
+  document.querySelectorAll('#f-paradas-body .fila-parada').forEach(tr => {
+    const sel = tr.querySelector('.par-motivo');
+    sel.innerHTML = opcionesMotivo(sel.value);
+    llenarSubmotivos(tr);
   });
 }
 
@@ -1275,7 +1436,7 @@ async function cargarListado() {
         <td class="text-end">${fmt(r.prom_bidones_5L_hora,  1)}</td>
         <td class="text-end">${fmt(r.prom_bidones_10L_hora, 1)}</td>
         <td class="paradas-resumen">${r.cantidad_paradas
-          ? r.paradas.map(p => badgeMotivo(p.motivo_id, p.motivo)).join(' ') +
+          ? r.paradas.map(p => badgeMotivo(p.motivo_id, p.motivo) + (p.submotivo ? `<span class="small text-muted ms-1 me-2">${esc(p.submotivo)}</span>` : ' ')).join('') +
             `<div class="small text-muted">${r.cantidad_paradas} · ${fmtMin(r.minutos_parada)}</div>`
           : '<span class="text-muted small">—</span>'}</td>
         <td class="text-center" style="white-space:nowrap">
@@ -1341,7 +1502,7 @@ function textoOperarios(r) {
 
 function textoParadas(r) {
   return (r.paradas || [])
-    .map(p => `${p.motivo}${p.detalle ? ' - ' + p.detalle : ''} - ${p.minutos} min`)
+    .map(p => `${p.motivo}${p.submotivo ? ' › ' + p.submotivo : ''}${p.detalle ? ' - ' + p.detalle : ''} - ${p.minutos} min`)
     .join('\n');
 }
 
@@ -1362,15 +1523,23 @@ function nombreArchivoListado(f, ext) {
   return `KPI_Detalle_Turnos_${rango}${turno}.${ext}`;
 }
 
-// Paradas de los turnos listados agrupadas por motivo (mayor tiempo primero)
+// Paradas agrupadas por motivo + submotivo. Orden: motivos con más tiempo primero y, dentro, submotivos con más tiempo
+function agruparParadas(items) { // items: [{motivo, submotivo, cantidad, minutos}]
+  const map = {}, totMotivo = {};
+  items.forEach(p => {
+    const k = `${p.motivo}|${p.submotivo || ''}`;
+    map[k] = map[k] || { motivo: p.motivo, submotivo: p.submotivo || '', cantidad: 0, minutos: 0 };
+    map[k].cantidad += p.cantidad;
+    map[k].minutos  += p.minutos;
+    totMotivo[p.motivo] = (totMotivo[p.motivo] || 0) + p.minutos;
+  });
+  return Object.values(map).sort((x, y) =>
+    (totMotivo[y.motivo] - totMotivo[x.motivo]) || x.motivo.localeCompare(y.motivo) || (y.minutos - x.minutos));
+}
+
 function resumenParadasListado(rows) {
-  const map = {};
-  rows.forEach(r => (r.paradas || []).forEach(p => {
-    map[p.motivo] = map[p.motivo] || { motivo: p.motivo, cantidad: 0, minutos: 0 };
-    map[p.motivo].cantidad += 1;
-    map[p.motivo].minutos  += p.minutos;
-  }));
-  return Object.values(map).sort((x, y) => y.minutos - x.minutos);
+  return agruparParadas(rows.flatMap(r => (r.paradas || []).map(p =>
+    ({ motivo: p.motivo, submotivo: p.submotivo, cantidad: 1, minutos: p.minutos }))));
 }
 
 function totalesListado(rows) {
@@ -1445,7 +1614,8 @@ async function descargarExcelListado(filtro = null) {
     }
   }
 
-  // ── Hoja 1: Turnos (una fila por turno, con todo el detalle)
+  // ── Hoja 1: Turnos. Cada parada en su fila y cada dato en su columna;
+  //    los datos del turno se combinan verticalmente (los totales no se duplican)
   const wsT = wb.addWorksheet('Turnos');
   const colsT = [
     { header: 'Fecha',          key: 'fecha',   width: 12, style: { numFmt: 'dd/mm/yyyy' } },
@@ -1465,24 +1635,46 @@ async function descargarExcelListado(filtro = null) {
     { header: '10L/h',          key: 'b10h',    width: 7,  style: { numFmt: '0.0' } },
     { header: 'Cant. Paradas',  key: 'cantP',   width: 9 },
     { header: 'Min. Parada',    key: 'minP',    width: 9,  style: { numFmt: '#,##0' } },
-    { header: 'Paradas (motivo - detalle - tiempo)', key: 'paradas', width: 42 },
+    { header: 'Motivo parada',  key: 'pMotivo', width: 18 },
+    { header: 'Submotivo',      key: 'pSub',    width: 18 },
+    { header: 'Detalle parada', key: 'pDet',    width: 28 },
+    { header: 'Min.',           key: 'pMin',    width: 7,  style: { numFmt: '#,##0' } },
     { header: 'Observaciones',  key: 'obs',     width: 45 },
   ];
+  const colsParada = ['pMotivo', 'pSub', 'pDet', 'pMin'];
   let fila = prepararHoja(wsT, 'Detalle de turnos de producción', colsT);
   const primeraT = fila;
-  rows.forEach(r => {
-    wsT.getRow(fila++).values = {
-      fecha: aFecha(r.fecha), turno: r.turno, ops: textoOperarios(r),
-      ht: r.horas_totales, hp: r.horas_produccion, hpar: r.horas_parados, pct: r.pct_horas_activas / 100,
-      hbid: r.horas_bidones, hbot: r.horas_botellas,
-      bot: r.botellas_producidas, b5: r.bidones_5L || 0, b10: r.bidones_10L || 0,
-      both: r.prom_botellas_hora, b5h: r.prom_bidones_5L_hora, b10h: r.prom_bidones_10L_hora,
-      cantP: r.cantidad_paradas, minP: r.minutos_parada,
-      paradas: textoParadas(r), obs: r.observaciones || '',
-    };
+  const combinar = [];
+  rows.forEach((r, idx) => {
+    const paradas = r.paradas || [];
+    const n = Math.max(1, paradas.length);
+    for (let k = 0; k < n; k++) {
+      const p = paradas[k];
+      const v = k === 0 ? {
+        fecha: aFecha(r.fecha), turno: r.turno, ops: textoOperarios(r),
+        ht: r.horas_totales, hp: r.horas_produccion, hpar: r.horas_parados, pct: r.pct_horas_activas / 100,
+        hbid: r.horas_bidones, hbot: r.horas_botellas,
+        bot: r.botellas_producidas, b5: r.bidones_5L || 0, b10: r.bidones_10L || 0,
+        both: r.prom_botellas_hora, b5h: r.prom_bidones_5L_hora, b10h: r.prom_bidones_10L_hora,
+        cantP: r.cantidad_paradas, minP: r.minutos_parada, obs: r.observaciones || '',
+      } : {};
+      if (p) Object.assign(v, { pMotivo: p.motivo, pSub: p.submotivo || '', pDet: p.detalle || '', pMin: p.minutos });
+      else   v.pMotivo = 'Sin paradas';
+      wsT.getRow(fila).values = v;
+      if (idx % 2 === 1) {   // bandas por turno para distinguirlos
+        for (let c = 1; c <= colsT.length; c++) {
+          wsT.getRow(fila).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F9FC' } };
+        }
+      }
+      fila++;
+    }
+    if (n > 1) combinar.push([fila - n, fila - 1]);
   });
   const ultimaT = fila - 1;
   estiloFilas(wsT, primeraT, ultimaT, colsT.length);
+  combinar.forEach(([desde, hasta]) => {
+    colsT.forEach((c, i) => { if (!colsParada.includes(c.key)) wsT.mergeCells(desde, i + 1, hasta, i + 1); });
+  });
 
   // Totales con fórmulas (se recalculan si la gerencia filtra o edita)
   const t = totalesListado(rows);
@@ -1497,7 +1689,7 @@ async function descargarExcelListado(filtro = null) {
     both: { formula: `IF(E${fila}>0,J${fila}/E${fila},0)`, result: t.hp > 0 ? t.bot / t.hp : 0 },
     b5h:  { formula: `IF(E${fila}>0,K${fila}/E${fila},0)`, result: t.hp > 0 ? t.b5 / t.hp : 0 },
     b10h: { formula: `IF(E${fila}>0,L${fila}/E${fila},0)`, result: t.hp > 0 ? t.b10 / t.hp : 0 },
-    cantP: sum('P', t.cantP), minP: sum('Q', t.minP),
+    cantP: sum('P', t.cantP), minP: sum('Q', t.minP), pMin: sum('U', t.minP),
   };
   filaTotal(wsT, fila, colsT.length);
   wsT.autoFilter = { from: { row: 4, column: 1 }, to: { row: ultimaT, column: colsT.length } };
@@ -1507,8 +1699,9 @@ async function descargarExcelListado(filtro = null) {
   const colsP = [
     { header: 'Fecha',   key: 'fecha',   width: 12, style: { numFmt: 'dd/mm/yyyy' } },
     { header: 'Turno',   key: 'turno',   width: 9 },
-    { header: 'Motivo',  key: 'motivo',  width: 22 },
-    { header: 'Detalle', key: 'detalle', width: 40 },
+    { header: 'Motivo',    key: 'motivo',    width: 22 },
+    { header: 'Submotivo', key: 'submotivo', width: 22 },
+    { header: 'Detalle',   key: 'detalle',   width: 40 },
     { header: 'Minutos', key: 'min',     width: 10, style: { numFmt: '#,##0' } },
     { header: 'Horas',   key: 'hs',      width: 9,  style: { numFmt: '0.00' } },
   ];
@@ -1516,8 +1709,8 @@ async function descargarExcelListado(filtro = null) {
   const primeraP = fila;
   rows.forEach(r => (r.paradas || []).forEach(p => {
     wsP.getRow(fila).values = {
-      fecha: aFecha(r.fecha), turno: r.turno, motivo: p.motivo, detalle: p.detalle || '',
-      min: p.minutos, hs: { formula: `E${fila}/60`, result: p.minutos / 60 },
+      fecha: aFecha(r.fecha), turno: r.turno, motivo: p.motivo, submotivo: p.submotivo || '', detalle: p.detalle || '',
+      min: p.minutos, hs: { formula: `F${fila}/60`, result: p.minutos / 60 },
     };
     fila++;
   }));
@@ -1525,8 +1718,8 @@ async function descargarExcelListado(filtro = null) {
   if (ultimaP >= primeraP) {
     estiloFilas(wsP, primeraP, ultimaP, colsP.length);
     wsP.getRow(fila).values = {
-      fecha: 'TOTAL', min: { formula: `SUM(E${primeraP}:E${ultimaP})`, result: t.minP },
-      hs: { formula: `E${fila}/60`, result: t.minP / 60 },
+      fecha: 'TOTAL', min: { formula: `SUM(F${primeraP}:F${ultimaP})`, result: t.minP },
+      hs: { formula: `F${fila}/60`, result: t.minP / 60 },
     };
     filaTotal(wsP, fila, colsP.length);
     wsP.autoFilter = { from: { row: 4, column: 1 }, to: { row: ultimaP, column: colsP.length } };
@@ -1537,21 +1730,22 @@ async function descargarExcelListado(filtro = null) {
   // ── Hoja 3: Resumen de paradas por motivo
   const wsR = wb.addWorksheet('Resumen paradas');
   const colsR = [
-    { header: 'Motivo',               key: 'motivo', width: 26 },
+    { header: 'Motivo',               key: 'motivo', width: 24 },
+    { header: 'Submotivo',            key: 'sub',    width: 24 },
     { header: 'Cant. paradas',        key: 'cant',   width: 12 },
     { header: 'Minutos',              key: 'min',    width: 11, style: { numFmt: '#,##0' } },
     { header: 'Horas',                key: 'hs',     width: 9,  style: { numFmt: '0.00' } },
     { header: '% del tiempo parado',  key: 'pct',    width: 14, style: { numFmt: '0.0%' } },
   ];
-  fila = prepararHoja(wsR, 'Resumen de paradas por motivo', colsR);
+  fila = prepararHoja(wsR, 'Resumen de paradas por motivo y submotivo', colsR);
   const primeraR = fila;
   const resumen = resumenParadasListado(rows);
   const filaTotR = primeraR + resumen.length;
   resumen.forEach(p => {
     wsR.getRow(fila).values = {
-      motivo: p.motivo, cant: p.cantidad, min: p.minutos,
-      hs:  { formula: `C${fila}/60`, result: p.minutos / 60 },
-      pct: { formula: `IF($C$${filaTotR}>0,C${fila}/$C$${filaTotR},0)`, result: t.minP ? p.minutos / t.minP : 0 },
+      motivo: p.motivo, sub: p.submotivo || '—', cant: p.cantidad, min: p.minutos,
+      hs:  { formula: `D${fila}/60`, result: p.minutos / 60 },
+      pct: { formula: `IF($D$${filaTotR}>0,D${fila}/$D$${filaTotR},0)`, result: t.minP ? p.minutos / t.minP : 0 },
     };
     fila++;
   });
@@ -1559,10 +1753,10 @@ async function descargarExcelListado(filtro = null) {
     estiloFilas(wsR, primeraR, fila - 1, colsR.length);
     wsR.getRow(fila).values = {
       motivo: 'TOTAL',
-      cant: { formula: `SUM(B${primeraR}:B${fila - 1})`, result: t.cantP },
-      min:  { formula: `SUM(C${primeraR}:C${fila - 1})`, result: t.minP },
-      hs:   { formula: `C${fila}/60`, result: t.minP / 60 },
-      pct:  { formula: `IF(C${fila}>0,1,0)`, result: t.minP ? 1 : 0 },
+      cant: { formula: `SUM(C${primeraR}:C${fila - 1})`, result: t.cantP },
+      min:  { formula: `SUM(D${primeraR}:D${fila - 1})`, result: t.minP },
+      hs:   { formula: `D${fila}/60`, result: t.minP / 60 },
+      pct:  { formula: `IF(D${fila}>0,1,0)`, result: t.minP ? 1 : 0 },
     };
     filaTotal(wsR, fila, colsR.length);
   } else {
@@ -1642,20 +1836,20 @@ function descargarPDFListado() {
     if (y > 160) { doc.addPage(); y = 20; }
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
     doc.setFillColor(255, 245, 220); doc.rect(14, y, 269, 6, 'F');
-    doc.text('RESUMEN DE PARADAS POR MOTIVO', 16, y + 4.5);
+    doc.text('RESUMEN DE PARADAS POR MOTIVO Y SUBMOTIVO', 16, y + 4.5);
     y += 8;
     doc.autoTable({
       startY: y,
-      head: [['Motivo', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
+      head: [['Motivo', 'Submotivo', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
       body: [
-        ...resumen.map(p => [p.motivo, p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / t.minP * 100).toFixed(1)}%`]),
-        ['TOTAL', t.cantP, t.minP.toLocaleString('es-AR'), fmt(t.minP / 60, 2), '100%'],
+        ...resumen.map(p => [p.motivo, p.submotivo || '—', p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / t.minP * 100).toFixed(1)}%`]),
+        ['TOTAL', '', t.cantP, t.minP.toLocaleString('es-AR'), fmt(t.minP / 60, 2), '100%'],
       ],
       theme: 'grid',
-      tableWidth: 160,
+      tableWidth: 200,
       headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 8.5 },
       bodyStyles: { fontSize: 8.5 },
-      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
       didParseCell: (data) => {
         if (data.section === 'body' && data.row.index === resumen.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
       },
@@ -1834,6 +2028,38 @@ async function cargarReporteMensual() {
           </div>
         </div>
       </div>
+
+      <!-- Paradas por motivo y submotivo -->
+      ${(() => {
+        const det = agruparParadas(datos.flatMap(d => d.paradas_submotivo || []));
+        const tot = det.reduce((s, p) => s + p.minutos, 0);
+        if (!tot) return '';
+        return `
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white"><strong><i class="bi bi-diagram-2 me-2 text-warning"></i>Paradas por Motivo y Submotivo</strong></div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+              <thead class="table-light"><tr><th>Motivo</th><th>Submotivo</th><th class="text-end">Paradas</th><th class="text-end">Minutos</th><th class="text-end">Horas</th><th style="width:30%">% del tiempo parado</th></tr></thead>
+              <tbody>
+                ${det.map(p => {
+                  const pct = p.minutos / tot * 100;
+                  return `<tr>
+                    <td>${esc(p.motivo)}</td>
+                    <td>${p.submotivo ? esc(p.submotivo) : '<span class="text-muted">—</span>'}</td>
+                    <td class="text-end">${p.cantidad}</td>
+                    <td class="text-end">${p.minutos.toLocaleString('es-AR')}</td>
+                    <td class="text-end">${fmt(p.minutos / 60, 2)}</td>
+                    <td><div class="d-flex align-items-center gap-2"><div class="progress flex-fill" style="height:8px"><div class="progress-bar bg-warning" style="width:${pct.toFixed(1)}%"></div></div><span class="small text-muted" style="width:44px">${pct.toFixed(1)}%</span></div></td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+              <tfoot class="table-light fw-bold"><tr><td colspan="2">TOTAL</td><td class="text-end">${det.reduce((s, p) => s + p.cantidad, 0)}</td><td class="text-end">${tot.toLocaleString('es-AR')}</td><td class="text-end">${fmt(tot / 60, 2)}</td><td></td></tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>`;
+      })()}
 
       <!-- Tabla KPI -->
       <div class="card shadow-sm">
@@ -2072,26 +2298,26 @@ function descargarPDFMensual() {
   });
   y = doc.lastAutoTable.finalY + 8;
 
-  // Tabla de distribución de paradas por motivo
-  const resumenP = resumenParadasPeriodo(datos);
+  // Tabla de distribución de paradas por motivo y submotivo
+  const resumenP = agruparParadas(datos.flatMap(d => d.paradas_submotivo || []));
   if (totMinP > 0) {
     if (y > 170) { doc.addPage(); y = 20; }
     doc.setFontSize(10); doc.setFont('helvetica', 'bold');
     doc.setFillColor(255, 245, 220); doc.rect(14, y, 269, 6, 'F');
-    doc.text('DISTRIBUCIÓN DE PARADAS POR MOTIVO', 16, y + 4.5);
+    doc.text('DISTRIBUCIÓN DE PARADAS POR MOTIVO Y SUBMOTIVO', 16, y + 4.5);
     y += 8;
 
     doc.autoTable({
       startY: y,
-      head: [['Motivo de Parada', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
+      head: [['Motivo de Parada', 'Submotivo', 'Cant. paradas', 'Minutos', 'Horas', '% del tiempo parado']],
       body: [
-        ...resumenP.map(p => [p.motivo, p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / totMinP * 100).toFixed(1)}%`]),
-        ['TOTAL', totCantP, totMinP.toLocaleString('es-AR'), fmt(totMinP / 60, 2), '100%'],
+        ...resumenP.map(p => [p.motivo, p.submotivo || '—', p.cantidad, p.minutos.toLocaleString('es-AR'), fmt(p.minutos / 60, 2), `${(p.minutos / totMinP * 100).toFixed(1)}%`]),
+        ['TOTAL', '', totCantP, totMinP.toLocaleString('es-AR'), fmt(totMinP / 60, 2), '100%'],
       ],
       theme: 'grid',
       headStyles: { fillColor: [200, 140, 0], textColor: 255, fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
       didParseCell: (data) => {
         if (data.section === 'body' && data.row.index === resumenP.length) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [255, 240, 200]; }
       },

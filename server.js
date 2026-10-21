@@ -66,8 +66,11 @@ const SELECT_PRODUCCION = `
     COALESCE((
       SELECT json_agg(json_build_object(
                'id', pa.id, 'motivo_id', pa.motivo_id, 'motivo', m.nombre,
+               'submotivo_id', pa.submotivo_id, 'submotivo', COALESCE(s.nombre, ''),
                'detalle', pa.detalle, 'minutos', pa.minutos) ORDER BY pa.orden, pa.id)
-      FROM paradas pa JOIN motivos_parada m ON m.id = pa.motivo_id
+      FROM paradas pa
+      JOIN motivos_parada m         ON m.id = pa.motivo_id
+      LEFT JOIN submotivos_parada s ON s.id = pa.submotivo_id
       WHERE pa.produccion_id = p.id
     ), '[]') AS paradas
   FROM produccion p
@@ -107,8 +110,9 @@ async function validarRegistro(d) {
 
   // Paradas
   const paradas = (Array.isArray(d.paradas) ? d.paradas : []).map((p, i) => ({
-    motivo_id: parseInt(p.motivo_id),
-    detalle:   (p.detalle || '').toString().trim(),
+    motivo_id:    parseInt(p.motivo_id),
+    submotivo_id: parseInt(p.submotivo_id) || null,
+    detalle:      (p.detalle || '').toString().trim(),
     minutos:   parseInt(p.minutos),
     orden:     i,
   }));
@@ -120,6 +124,18 @@ async function validarRegistro(d) {
   if (motivoIds.length > 0) {
     const { rows } = await pool.query('SELECT id FROM motivos_parada WHERE id = ANY($1::int[])', [motivoIds]);
     if (rows.length !== motivoIds.length) errores.push('Hay paradas con un motivo que no existe');
+
+    // Submotivo: debe pertenecer al motivo, y es obligatorio si el motivo tiene submotivos activos
+    const { rows: subs } = await pool.query(
+      'SELECT id, motivo_id, activo FROM submotivos_parada WHERE motivo_id = ANY($1::int[])', [motivoIds]);
+    paradas.forEach((p, i) => {
+      const delMotivo = subs.filter(s => s.motivo_id === p.motivo_id);
+      if (p.submotivo_id) {
+        if (!delMotivo.some(s => s.id === p.submotivo_id)) errores.push(`Parada ${i + 1}: el submotivo no corresponde al motivo elegido`);
+      } else if (delMotivo.some(s => s.activo)) {
+        errores.push(`Parada ${i + 1}: elegí el submotivo`);
+      }
+    });
   }
 
   // Horas: parados = suma de paradas; producción = totales − parados
@@ -159,8 +175,8 @@ async function guardarHijos(client, produccionId, datos) {
   }
   for (const p of datos.paradas) {
     await client.query(
-      'INSERT INTO paradas (produccion_id, motivo_id, detalle, minutos, orden) VALUES ($1, $2, $3, $4, $5)',
-      [produccionId, p.motivo_id, p.detalle, p.minutos, p.orden]
+      'INSERT INTO paradas (produccion_id, motivo_id, submotivo_id, detalle, minutos, orden) VALUES ($1, $2, $3, $4, $5, $6)',
+      [produccionId, p.motivo_id, p.submotivo_id, p.detalle, p.minutos, p.orden]
     );
   }
 }
@@ -548,13 +564,74 @@ abmMaestro({
   usoSql: 'SELECT COUNT(*) FROM paradas x WHERE x.motivo_id = t.id',
 });
 
+// ─────────────────────────────────────────────
+// SUBMOTIVOS DE PARADA (dependen del motivo)
+// ─────────────────────────────────────────────
+app.get('/api/submotivos', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT s.*, m.nombre AS motivo,
+        (SELECT COUNT(*) FROM paradas x WHERE x.submotivo_id = s.id)::int AS usos
+      FROM submotivos_parada s JOIN motivos_parada m ON m.id = s.motivo_id
+      ORDER BY LOWER(m.nombre), s.activo DESC, LOWER(s.nombre)`);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function guardarSubmotivo(req, res, id = null) {
+  const nombre    = (req.body.nombre ?? '').toString().trim().replace(/\s+/g, ' ');
+  const motivo_id = parseInt(req.body.motivo_id);
+  const activo    = req.body.activo === undefined ? true : !!req.body.activo;
+  if (!(motivo_id > 0)) return res.status(400).json({ errores: ['Elegí el motivo'] });
+  if (!nombre)          return res.status(400).json({ errores: ['El nombre del submotivo es obligatorio'] });
+  try {
+    if (id) {
+      // No permitir cambiar de motivo si ya se usó (quedarían paradas inconsistentes)
+      const { rows: [actual] } = await pool.query(
+        'SELECT motivo_id, (SELECT COUNT(*) FROM paradas WHERE submotivo_id = $1)::int AS usos FROM submotivos_parada WHERE id = $1', [id]);
+      if (!actual) return res.status(404).json({ error: 'Submotivo no encontrado' });
+      if (actual.usos > 0 && actual.motivo_id !== motivo_id) {
+        return res.status(409).json({ errores: ['Este submotivo ya se usó: no se puede pasar a otro motivo. Creá uno nuevo.'] });
+      }
+      const { rows } = await pool.query(
+        'UPDATE submotivos_parada SET motivo_id = $1, nombre = $2, activo = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
+        [motivo_id, nombre, activo, id]);
+      return res.json(rows[0]);
+    }
+    const { rows } = await pool.query(
+      'INSERT INTO submotivos_parada (motivo_id, nombre, activo) VALUES ($1, $2, $3) RETURNING *', [motivo_id, nombre, activo]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ errores: ['Ese motivo ya tiene un submotivo con ese nombre'] });
+    if (err.code === '23503') return res.status(400).json({ errores: ['El motivo no existe'] });
+    res.status(500).json({ error: err.message });
+  }
+}
+
+app.post('/api/submotivos', (req, res) => guardarSubmotivo(req, res));
+app.put('/api/submotivos/:id', (req, res) => guardarSubmotivo(req, res, parseInt(req.params.id)));
+app.delete('/api/submotivos/:id', async (req, res) => {
+  try {
+    const { rows } = await pool.query('DELETE FROM submotivos_parada WHERE id = $1 RETURNING id', [parseInt(req.params.id)]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Submotivo no encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'No se puede eliminar: el submotivo ya está usado en paradas. Desactivalo para que no aparezca más en la carga.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Detalles de parada ya usados (para autocompletar en la carga)
 app.get('/api/paradas/detalles', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT motivo_id, detalle, COUNT(*)::int AS usos
+      SELECT motivo_id, submotivo_id, detalle, COUNT(*)::int AS usos
       FROM paradas WHERE COALESCE(detalle, '') <> ''
-      GROUP BY motivo_id, detalle
+      GROUP BY motivo_id, submotivo_id, detalle
       ORDER BY usos DESC, detalle
       LIMIT 500
     `);
@@ -587,7 +664,7 @@ app.get('/api/reportes/mensual', async (req, res) => {
   try {
     const { fecha_desde = '2000-01-01', fecha_hasta = '2099-12-31' } = req.query;
 
-    const [resProd, resParadas] = await Promise.all([
+    const [resProd, resParadas, resSub] = await Promise.all([
       pool.query(`
         SELECT
           TO_CHAR(fecha::date, 'YYYY-MM')  AS mes,
@@ -617,6 +694,22 @@ app.get('/api/reportes/mensual', async (req, res) => {
         GROUP BY 1, 2, 3
         ORDER BY 1, 3
       `, [fecha_desde, fecha_hasta]),
+      pool.query(`
+        SELECT
+          TO_CHAR(p.fecha::date, 'YYYY-MM') AS mes,
+          m.id                              AS motivo_id,
+          m.nombre                          AS motivo,
+          COALESCE(s.nombre, '')            AS submotivo,
+          COUNT(*)::int                     AS cantidad,
+          SUM(pa.minutos)::int              AS minutos
+        FROM paradas pa
+        JOIN produccion p             ON p.id = pa.produccion_id
+        JOIN motivos_parada m         ON m.id = pa.motivo_id
+        LEFT JOIN submotivos_parada s ON s.id = pa.submotivo_id
+        WHERE p.fecha BETWEEN $1 AND $2
+        GROUP BY 1, 2, 3, 4
+        ORDER BY 1, 3, 4
+      `, [fecha_desde, fecha_hasta]),
     ]);
 
     const resultado = resProd.rows.map(r => {
@@ -628,6 +721,9 @@ app.get('/api/reportes/mensual', async (req, res) => {
       const paradas = resParadas.rows
         .filter(p => p.mes === r.mes)
         .map(p => ({ motivo_id: p.motivo_id, motivo: p.motivo, cantidad: p.cantidad, minutos: p.minutos }));
+      const paradas_submotivo = resSub.rows
+        .filter(p => p.mes === r.mes)
+        .map(p => ({ motivo_id: p.motivo_id, motivo: p.motivo, submotivo: p.submotivo, cantidad: p.cantidad, minutos: p.minutos }));
 
       return {
         mes:                   r.mes,
@@ -647,6 +743,7 @@ app.get('/api/reportes/mensual', async (req, res) => {
         cantidad_paradas:      paradas.reduce((a, p) => a + p.cantidad, 0),
         minutos_paradas:       paradas.reduce((a, p) => a + p.minutos, 0),
         paradas,
+        paradas_submotivo,
       };
     });
 

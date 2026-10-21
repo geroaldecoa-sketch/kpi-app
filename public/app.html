@@ -121,8 +121,9 @@
                   <a href="#" class="small" onclick="irAConfiguracion(event)"><i class="bi bi-gear me-1"></i>Administrar motivos</a>
                 </div>
                 <div class="row g-2 d-none d-md-flex paradas-head">
-                  <div class="col-md-4">Motivo <span class="text-danger">*</span></div>
-                  <div class="col-md-5">Detalle</div>
+                  <div class="col-md-3">Motivo <span class="text-danger">*</span></div>
+                  <div class="col-md-3">Submotivo</div>
+                  <div class="col-md-3">Detalle</div>
                   <div class="col-md-2">Minutos <span class="text-danger">*</span></div>
                 </div>
                 <div id="f-paradas-body"></div>
@@ -412,8 +413,8 @@
       </div>
 
       <!-- ABM MOTIVOS DE PARADA -->
-      <div class="col-12 col-xl-5">
-        <div class="card shadow-sm h-100">
+      <div class="col-12 col-xl-5 d-flex flex-column gap-4">
+        <div class="card shadow-sm">
           <div class="card-header bg-white py-3">
             <h5 class="mb-0"><i class="bi bi-pause-circle me-2 text-warning"></i>Motivos de parada</h5>
           </div>
@@ -436,9 +437,46 @@
             <div class="table-responsive">
               <table class="table table-sm table-hover align-middle mb-0">
                 <thead class="table-light">
-                  <tr><th>Motivo</th><th class="text-center">Paradas</th><th class="text-center">Activo</th><th class="text-center">Acciones</th></tr>
+                  <tr><th>Motivo</th><th class="text-center">Submotivos</th><th class="text-center">Paradas</th><th class="text-center">Activo</th><th class="text-center">Acciones</th></tr>
                 </thead>
                 <tbody id="tbody-motivos"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ABM SUBMOTIVOS (dependen del motivo) -->
+        <div class="card shadow-sm flex-fill" id="card-submotivos">
+          <div class="card-header bg-white py-3">
+            <h5 class="mb-0"><i class="bi bi-diagram-2 me-2 text-warning"></i>Submotivos de parada</h5>
+            <div class="small text-muted mt-1">Cada motivo tiene su propia lista (ej: Mantenimiento → Sopladora, Etiquetadora).</div>
+          </div>
+          <div class="card-body">
+            <form id="form-submotivo" class="row g-2 align-items-end mb-3" novalidate>
+              <input type="hidden" id="sm-id" />
+              <div class="col-sm-5">
+                <label class="form-label fw-semibold small mb-1">Motivo <span class="text-danger">*</span></label>
+                <select class="form-select form-select-sm" id="sm-motivo"></select>
+              </div>
+              <div class="col-sm-4">
+                <label class="form-label fw-semibold small mb-1">Submotivo <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="sm-nombre" maxlength="100" required />
+              </div>
+              <div class="col-sm-3 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-primary flex-fill" id="sm-btn">
+                  <i class="bi bi-plus-lg me-1"></i><span>Agregar</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="sm-cancelar" title="Cancelar edición">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
+            </form>
+            <div class="table-responsive tabla-scroll">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr><th>Motivo</th><th>Submotivo</th><th class="text-center">Paradas</th><th class="text-center">Activo</th><th class="text-center">Acciones</th></tr>
+                </thead>
+                <tbody id="tbody-submotivos"></tbody>
               </table>
             </div>
           </div>
@@ -489,7 +527,7 @@
 
     </div>
     <p class="text-muted small mt-3 mb-0">
-      <i class="bi bi-info-circle me-1"></i>Los operarios y motivos que ya se usaron en algún turno no se pueden eliminar: desactivalos para que dejen de aparecer en la carga sin perder el historial.
+      <i class="bi bi-info-circle me-1"></i>Los operarios, motivos y submotivos que ya se usaron en algún turno no se pueden eliminar: desactivalos para que dejen de aparecer en la carga sin perder el historial.
     </p>
   </section>
 
